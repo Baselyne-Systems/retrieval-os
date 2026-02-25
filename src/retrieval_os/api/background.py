@@ -16,6 +16,7 @@ import asyncio
 import structlog
 
 from retrieval_os.core.config import settings
+from retrieval_os.core.database import async_session_factory
 
 log = structlog.get_logger(__name__)
 
@@ -25,13 +26,21 @@ async def rollback_watchdog() -> None:
     Monitors active deployments every N seconds.
     Triggers automatic rollback when error_rate, latency_p99, or recall
     exceeds the thresholds configured on each Deployment record.
+    Phase 6 populates the eval metrics this watchdog reads.
     """
+    from retrieval_os.deployments.service import check_rollback_thresholds
+
     interval = settings.rollback_watchdog_interval_seconds
     while True:
         try:
             await asyncio.sleep(interval)
-            # Phase 4: query active deployments, fetch Prometheus metrics,
-            # call deployment_service.trigger_rollback() if thresholds exceeded.
+            async with async_session_factory() as session:
+                triggered = await check_rollback_thresholds(session)
+                if triggered:
+                    log.info(
+                        "background.rollback_watchdog.triggered",
+                        count=triggered,
+                    )
         except asyncio.CancelledError:
             log.info("background.rollback_watchdog.stopped")
             raise
@@ -45,13 +54,20 @@ async def rollout_stepper() -> None:
     Increments traffic_weight by rollout_step_percent until 100%, then
     transitions status to ACTIVE.
     """
+    from retrieval_os.deployments.service import step_rolling_deployments
+
     interval = settings.rollout_stepper_interval_seconds
     while True:
         try:
             await asyncio.sleep(interval)
-            # Phase 4: find CANARY deployments with gradual strategy whose
-            # last_step_at + rollout_step_interval_seconds <= now,
-            # then increment traffic_weight and update Redis weight cache.
+            async with async_session_factory() as session:
+                advanced = await step_rolling_deployments(session)
+                await session.commit()
+                if advanced:
+                    log.info(
+                        "background.rollout_stepper.stepped",
+                        deployments_advanced=advanced,
+                    )
         except asyncio.CancelledError:
             log.info("background.rollout_stepper.stopped")
             raise
