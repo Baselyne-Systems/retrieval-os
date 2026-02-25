@@ -104,15 +104,24 @@ async def eval_job_runner() -> None:
 
 async def cost_aggregator() -> None:
     """
-    Aggregates UsageRecords into CostEntries once per hour.
-    Idempotent: records already aggregated in a cost_entry window are skipped.
+    Aggregates usage_records into cost_entries in 1-hour windows.
+    Processes the last 48 hours on each run (idempotent via upsert).
+    Runs once per hour (cost_aggregator_interval_seconds).
     """
+    from retrieval_os.intelligence.aggregator import aggregate_usage_costs
+
     interval = settings.cost_aggregator_interval_seconds
     while True:
         try:
             await asyncio.sleep(interval)
-            # Phase 7: group usage_records by (plan_version_id, hour, model),
-            # compute cost from model_pricing table, upsert into cost_entries.
+            async with async_session_factory() as session:
+                upserted = await aggregate_usage_costs(session)
+                await session.commit()
+                if upserted:
+                    log.info(
+                        "background.cost_aggregator.completed",
+                        windows_upserted=upserted,
+                    )
         except asyncio.CancelledError:
             log.info("background.cost_aggregator.stopped")
             raise
