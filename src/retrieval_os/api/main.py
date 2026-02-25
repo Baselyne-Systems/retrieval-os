@@ -147,6 +147,7 @@ def create_app() -> FastAPI:
         )
 
     # ── Routers ────────────────────────────────────────────────────────────────
+    from retrieval_os.api.multimodal_router import router as multimodal_router
     from retrieval_os.api.serving_router import router as serving_router
     from retrieval_os.deployments.router import router as deployments_router
     from retrieval_os.evaluations.router import router as eval_router
@@ -158,10 +159,10 @@ def create_app() -> FastAPI:
     app.include_router(plans_router)
     app.include_router(deployments_router)
     app.include_router(serving_router)
+    app.include_router(multimodal_router)
     app.include_router(lineage_router)
     app.include_router(eval_router)
     app.include_router(intelligence_router)
-    # Phase 8+: production hardening
 
     # ── OTel auto-instrumentation ──────────────────────────────────────────────
     FastAPIInstrumentor.instrument_app(app)

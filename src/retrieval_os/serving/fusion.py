@@ -71,13 +71,12 @@ async def sparse_search(
     query: str,
     top_k: int,
 ) -> list[IndexHit]:
-    """BM25 / sparse vector search — planned for Phase 9 (full-text index).
+    """BM25-style sparse vector search via Qdrant named sparse vectors.
 
-    Currently returns an empty list so that RRF degrades gracefully to
-    pure dense retrieval when called with a sparse list.
+    Delegates to ``sparse.sparse_vector_search``.  If the Qdrant collection
+    has no sparse vector field, or if Qdrant is unavailable, an empty list is
+    returned so RRF degrades gracefully to pure-dense retrieval.
     """
-    log.debug(
-        "sparse_search.stub",
-        extra={"collection": collection, "top_k": top_k},
-    )
-    return []
+    from retrieval_os.serving.sparse import sparse_vector_search
+
+    return await sparse_vector_search(collection=collection, query=query, top_k=top_k)

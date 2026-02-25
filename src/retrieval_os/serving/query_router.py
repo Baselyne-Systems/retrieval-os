@@ -17,7 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from retrieval_os.core.exceptions import PlanNotFoundError
 from retrieval_os.core.redis_client import get_redis
 from retrieval_os.plans.repository import plan_repo
+from retrieval_os.serving.embed_router import embed_audio, embed_images
 from retrieval_os.serving.executor import RetrievedChunk, execute_retrieval
+from retrieval_os.serving.index_proxy import IndexHit, vector_search
 
 log = logging.getLogger(__name__)
 
@@ -129,3 +131,106 @@ async def route_query(
         "result_count": len(chunks),
     }
     return chunks, info
+
+
+# ── Multimodal query routes ───────────────────────────────────────────────────
+
+
+async def route_image_query(
+    *,
+    plan_name: str,
+    image_bytes: bytes,
+    db: AsyncSession,
+) -> tuple[list[RetrievedChunk], dict]:
+    """Embed an image with CLIP and search the plan's vector index.
+
+    The plan must have ``embedding_provider = "clip"`` set.
+
+    Returns:
+        (chunks, info_dict) matching the shape of route_query.
+    """
+    config = await _load_plan_config(plan_name, db)
+
+    hits: list[IndexHit] = await _embed_and_search(
+        vectors=await embed_images(
+            [image_bytes],
+            provider=config["embedding_provider"],
+            model=config["embedding_model"],
+        ),
+        config=config,
+    )
+
+    chunks = _hits_to_chunks(hits)
+    return chunks, {
+        "plan_name": plan_name,
+        "version": config["version"],
+        "cache_hit": False,
+        "result_count": len(chunks),
+    }
+
+
+async def route_audio_query(
+    *,
+    plan_name: str,
+    audio_bytes: bytes,
+    db: AsyncSession,
+    whisper_model_size: str = "base",
+) -> tuple[list[RetrievedChunk], dict]:
+    """Transcribe audio with Whisper, embed the transcript, and search.
+
+    The plan's ``embedding_provider`` / ``embedding_model`` are used for the
+    text embedding step after transcription.
+
+    Returns:
+        (chunks, info_dict) matching the shape of route_query.
+    """
+    config = await _load_plan_config(plan_name, db)
+
+    hits = await _embed_and_search(
+        vectors=await embed_audio(
+            [audio_bytes],
+            whisper_model_size=whisper_model_size,
+            text_provider=config["embedding_provider"],
+            text_model=config["embedding_model"],
+        ),
+        config=config,
+    )
+
+    chunks = _hits_to_chunks(hits)
+    return chunks, {
+        "plan_name": plan_name,
+        "version": config["version"],
+        "cache_hit": False,
+        "result_count": len(chunks),
+    }
+
+
+# ── Shared helpers ────────────────────────────────────────────────────────────
+
+
+async def _embed_and_search(
+    *,
+    vectors: list[list[float]],
+    config: dict,
+) -> list[IndexHit]:
+    """Run vector search with the first vector in *vectors* against plan config."""
+    return await vector_search(
+        backend=config["index_backend"],
+        collection=config["index_collection"],
+        vector=vectors[0],
+        top_k=config["top_k"],
+        distance_metric=config["distance_metric"],
+        metadata_filters=config.get("metadata_filters"),
+    )
+
+
+def _hits_to_chunks(hits: list[IndexHit]) -> list[RetrievedChunk]:
+    return [
+        RetrievedChunk(
+            id=h.id,
+            score=h.score,
+            text=h.payload.get("text", ""),
+            metadata={k: v for k, v in h.payload.items() if k != "text"},
+        )
+        for h in hits
+    ]
