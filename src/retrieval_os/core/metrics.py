@@ -41,13 +41,27 @@ query_errors_total = Counter(
 cache_hits_total = Counter(
     "retrieval_os_cache_hits_total",
     "Semantic query cache hits",
-    ["plan_name", "deployment_id"],
+    ["plan_name"],
 )
 
 cache_misses_total = Counter(
     "retrieval_os_cache_misses_total",
     "Semantic query cache misses",
-    ["plan_name", "deployment_id"],
+    ["plan_name"],
+)
+
+# Phase 3 serving path metrics
+retrieval_requests_total = Counter(
+    "retrieval_os_retrieval_requests_total",
+    "Total retrieval executions",
+    ["plan_name"],
+)
+
+retrieval_latency_seconds = Histogram(
+    "retrieval_os_retrieval_latency_seconds",
+    "End-to-end retrieval executor latency in seconds",
+    ["plan_name"],
+    buckets=[0.01, 0.025, 0.05, 0.1, 0.2, 0.5, 1.0, 5.0],
 )
 
 # ── Embed Router ──────────────────────────────────────────────────────────────
@@ -74,7 +88,20 @@ embed_cost_usd_total = Counter(
 embed_errors_total = Counter(
     "retrieval_os_embed_errors_total",
     "Embedding errors",
-    ["provider", "model", "error_type"],
+    ["provider"],
+)
+
+embed_requests_total = Counter(
+    "retrieval_os_embed_requests_total",
+    "Total embedding requests",
+    ["provider"],
+)
+
+embed_latency_seconds = Histogram(
+    "retrieval_os_embed_latency_seconds",
+    "Embedding latency in seconds",
+    ["provider"],
+    buckets=[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0],
 )
 
 # ── Index Proxy ───────────────────────────────────────────────────────────────
@@ -90,6 +117,19 @@ index_query_errors_total = Counter(
     "retrieval_os_index_query_errors_total",
     "Index query errors",
     ["backend", "collection", "error_type"],
+)
+
+index_errors_total = Counter(
+    "retrieval_os_index_errors_total",
+    "Index errors (serving path)",
+    ["backend"],
+)
+
+index_latency_seconds = Histogram(
+    "retrieval_os_index_latency_seconds",
+    "Index query latency in seconds (serving path)",
+    ["backend"],
+    buckets=[0.002, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5],
 )
 
 index_connections_active = Gauge(
