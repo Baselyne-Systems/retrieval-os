@@ -1,0 +1,33 @@
+groups:
+  - name: retrieval_os_serving
+    rules:
+      - alert: RetrievalHighErrorRate
+        expr: |
+          rate(retrieval_os_query_errors_total[5m])
+          / rate(retrieval_os_router_requests_total[5m]) > 0.01
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High query error rate on {{ $labels.plan_name }}"
+          description: "Error rate is {{ $value | humanizePercentage }} (threshold 1%)"
+
+      - alert: RetrievalCriticalErrorRate
+        expr: |
+          rate(retrieval_os_query_errors_total[5m])
+          / rate(retrieval_os_router_requests_total[5m]) > 0.05
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical query error rate on {{ $labels.plan_name }}"
+
+      - alert: RetrievalHighLatencyP99
+        expr: |
+          histogram_quantile(0.99, rate(retrieval_os_query_duration_seconds_bucket[5m])) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "P99 latency above 500ms for {{ $labels.plan_name }}"
+          description: "P99 = {{ $value | humanizeDuration }}"

@@ -1,0 +1,23 @@
+groups:
+  - name: retrieval_os_eval
+    rules:
+      - alert: RecallRegressionWarning
+        expr: |
+          retrieval_os_eval_recall_at_k
+          - retrieval_os_eval_recall_at_k offset 24h < -0.05
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Recall@{{ $labels.k }} regressed >5% for {{ $labels.plan_name }}"
+          description: "Current: {{ $value }}"
+
+      - alert: RecallRegressionCritical
+        expr: |
+          retrieval_os_eval_recall_at_k
+          - retrieval_os_eval_recall_at_k offset 24h < -0.10
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Recall@{{ $labels.k }} regressed >10% for {{ $labels.plan_name }}"

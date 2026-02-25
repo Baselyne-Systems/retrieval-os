@@ -1,0 +1,13 @@
+groups:
+  - name: retrieval_os_cost
+    rules:
+      - alert: EmbeddingCostSpike
+        expr: |
+          rate(retrieval_os_cost_usd_total[1h])
+          > 1.5 * avg_over_time(rate(retrieval_os_cost_usd_total[1h])[7d:1h])
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Embedding cost spike on {{ $labels.plan_name }}"
+          description: "Cost rate is 50%+ above 7-day average"

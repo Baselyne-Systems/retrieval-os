@@ -1,0 +1,20 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - "alert_rules/*.yaml"
+
+alerting:
+  alertmanagers: []  # wire to alertmanager in production
+
+scrape_configs:
+  - job_name: "retrieval-os-api"
+    static_configs:
+      - targets: ["host.docker.internal:8000"]
+    metrics_path: /metrics
+    scrape_interval: 15s
+
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
