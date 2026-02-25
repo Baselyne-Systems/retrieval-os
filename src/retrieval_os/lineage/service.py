@@ -49,18 +49,17 @@ async def _verify_s3_artifact(storage_uri: str) -> dict:
     """Fetch S3 object metadata. Raises ArtifactStorageNotFoundError if missing."""
     bucket, key = _parse_s3_uri(storage_uri)
     try:
-        head = await object_exists(bucket, key)
-        if not head:
+        exists = await object_exists(key, bucket=bucket)
+        if not exists:
             raise ArtifactStorageNotFoundError(
                 f"S3 object not found: {storage_uri}",
                 detail={"storage_uri": storage_uri},
             )
         from retrieval_os.core.s3_client import get_object_metadata
-        meta = await get_object_metadata(bucket, key)
+        meta = await get_object_metadata(key, bucket=bucket)
         return {
-            "s3_content_length": meta.get("ContentLength"),
-            "s3_etag": meta.get("ETag", "").strip('"'),
-            "s3_last_modified": str(meta.get("LastModified", "")),
+            "s3_size_bytes": meta.get("size_bytes"),
+            "s3_etag": meta.get("etag", ""),
         }
     except ArtifactStorageNotFoundError:
         raise

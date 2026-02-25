@@ -79,15 +79,22 @@ async def eval_job_runner() -> None:
     """
     Drains QUEUED eval jobs from the eval_jobs table.
     Processes one job at a time to avoid overwhelming embedding/index backends.
-    On restart, stale RUNNING jobs are reset to QUEUED after a staleness check.
+    Uses SELECT FOR UPDATE SKIP LOCKED so multiple replicas never duplicate work.
     """
+    from retrieval_os.evaluations.service import process_next_eval_job
+
     interval = settings.eval_job_poll_interval_seconds
     while True:
         try:
             await asyncio.sleep(interval)
-            # Phase 6: SELECT FOR UPDATE SKIP LOCKED on eval_jobs WHERE status='QUEUED',
-            # set status='RUNNING', run eval, write EvalRun, check regression,
-            # set status='COMPLETED' or 'FAILED'.
+            async with async_session_factory() as session:
+                job_id = await process_next_eval_job(session)
+                await session.commit()
+                if job_id:
+                    log.info(
+                        "background.eval_job_runner.processed",
+                        job_id=job_id,
+                    )
         except asyncio.CancelledError:
             log.info("background.eval_job_runner.stopped")
             raise

@@ -57,11 +57,13 @@ async def ensure_bucket_exists() -> None:
     await asyncio.to_thread(_ensure)
 
 
-async def object_exists(key: str) -> bool:
-    """Returns True if the object exists in the default bucket."""
+async def object_exists(key: str, bucket: str | None = None) -> bool:
+    """Returns True if the object exists in the given bucket (default if omitted)."""
+    actual_bucket = bucket or settings.s3_bucket_name
+
     def _check() -> bool:
         try:
-            _make_client().head_object(Bucket=settings.s3_bucket_name, Key=key)
+            _make_client().head_object(Bucket=actual_bucket, Key=key)
             return True
         except ClientError:
             return False
@@ -69,13 +71,26 @@ async def object_exists(key: str) -> bool:
     return await asyncio.to_thread(_check)
 
 
-async def get_object_metadata(key: str) -> dict[str, Any]:
-    """Returns ContentLength and ETag for an object."""
+async def get_object_metadata(key: str, bucket: str | None = None) -> dict[str, Any]:
+    """Returns size_bytes and etag for an object."""
+    actual_bucket = bucket or settings.s3_bucket_name
+
     def _head() -> dict[str, Any]:
-        resp = _make_client().head_object(Bucket=settings.s3_bucket_name, Key=key)
+        resp = _make_client().head_object(Bucket=actual_bucket, Key=key)
         return {
             "size_bytes": resp["ContentLength"],
             "etag": resp["ETag"].strip('"'),
         }
 
     return await asyncio.to_thread(_head)
+
+
+async def download_object_bytes(key: str, bucket: str | None = None) -> bytes:
+    """Download and return the full contents of an S3 object."""
+    actual_bucket = bucket or settings.s3_bucket_name
+
+    def _get() -> bytes:
+        resp = _make_client().get_object(Bucket=actual_bucket, Key=key)
+        return resp["Body"].read()
+
+    return await asyncio.to_thread(_get)
