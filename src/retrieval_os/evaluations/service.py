@@ -17,6 +17,8 @@ from retrieval_os.evaluations.repository import eval_repo
 from retrieval_os.evaluations.runner import EvalResults, execute_eval_job, load_eval_dataset
 from retrieval_os.evaluations.schemas import EvalJobListResponse, EvalJobResponse
 from retrieval_os.plans.models import PlanVersion, RetrievalPlan
+from retrieval_os.webhooks.delivery import fire_webhook_event
+from retrieval_os.webhooks.events import WebhookEvent
 
 log = logging.getLogger(__name__)
 
@@ -165,6 +167,18 @@ async def process_next_eval_job(session: AsyncSession) -> str | None:
                     ).inc()
 
         regression_detected = len(regressions) > 0
+
+        if regression_detected:
+            await fire_webhook_event(
+                WebhookEvent.EVAL_REGRESSION_DETECTED,
+                {
+                    "job_id": job_id,
+                    "plan_name": job.plan_name,
+                    "plan_version": job.plan_version,
+                    "regressions": regressions,
+                },
+                session,
+            )
 
         await eval_repo.complete_job(
             session,

@@ -160,6 +160,7 @@ def create_app() -> FastAPI:
     from retrieval_os.lineage.router import router as lineage_router
     from retrieval_os.plans.router import router as plans_router
     from retrieval_os.tenants.router import router as tenants_router
+    from retrieval_os.webhooks.router import router as webhooks_router
 
     app.include_router(health_router)
     app.include_router(plans_router)
@@ -170,6 +171,7 @@ def create_app() -> FastAPI:
     app.include_router(eval_router)
     app.include_router(intelligence_router)
     app.include_router(tenants_router)
+    app.include_router(webhooks_router)
 
     # ── OTel auto-instrumentation ──────────────────────────────────────────────
     FastAPIInstrumentor.instrument_app(app)

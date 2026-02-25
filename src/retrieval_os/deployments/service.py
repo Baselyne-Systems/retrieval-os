@@ -33,6 +33,8 @@ from retrieval_os.deployments.schemas import (
 )
 from retrieval_os.deployments.traffic import clear_active_deployment, set_active_deployment
 from retrieval_os.plans.repository import plan_repo
+from retrieval_os.webhooks.delivery import fire_webhook_event
+from retrieval_os.webhooks.events import WebhookEvent
 
 log = logging.getLogger(__name__)
 
@@ -151,6 +153,15 @@ async def _activate(
     deployment.updated_at = now
     await session.flush()
     await session.refresh(deployment)
+    await fire_webhook_event(
+        WebhookEvent.DEPLOYMENT_STATUS_CHANGED,
+        {
+            "deployment_id": deployment.id,
+            "plan_name": plan_name,
+            "status": DeploymentStatus.ACTIVE.value,
+        },
+        session,
+    )
     return deployment
 
 
@@ -184,6 +195,16 @@ async def rollback_deployment(
     )
     await session.refresh(deployment)
     await clear_active_deployment(plan_name)
+    await fire_webhook_event(
+        WebhookEvent.DEPLOYMENT_STATUS_CHANGED,
+        {
+            "deployment_id": deployment_id,
+            "plan_name": plan_name,
+            "status": DeploymentStatus.ROLLED_BACK.value,
+            "reason": request.reason,
+        },
+        session,
+    )
 
     metrics.rollback_events_total.labels(
         deployment_id=deployment_id,
@@ -252,6 +273,15 @@ async def step_rolling_deployments(session: AsyncSession) -> int:
             log.info(
                 "deployment.activated",
                 extra={"deployment_id": deployment.id, "plan_name": deployment.plan_name},
+            )
+            await fire_webhook_event(
+                WebhookEvent.DEPLOYMENT_STATUS_CHANGED,
+                {
+                    "deployment_id": deployment.id,
+                    "plan_name": deployment.plan_name,
+                    "status": DeploymentStatus.ACTIVE.value,
+                },
+                session,
             )
             metrics.rollout_duration_seconds.labels(
                 plan_name=deployment.plan_name
