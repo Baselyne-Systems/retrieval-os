@@ -149,13 +149,15 @@ def create_app() -> FastAPI:
     # ── Routers ────────────────────────────────────────────────────────────────
     from retrieval_os.api.serving_router import router as serving_router
     from retrieval_os.deployments.router import router as deployments_router
+    from retrieval_os.lineage.router import router as lineage_router
     from retrieval_os.plans.router import router as plans_router
 
     app.include_router(health_router)
     app.include_router(plans_router)
     app.include_router(deployments_router)
     app.include_router(serving_router)
-    # Phase 5+: lineage, evaluation, intelligence
+    app.include_router(lineage_router)
+    # Phase 6+: evaluation, intelligence
 
     # ── OTel auto-instrumentation ──────────────────────────────────────────────
     FastAPIInstrumentor.instrument_app(app)
