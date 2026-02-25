@@ -23,6 +23,7 @@ from retrieval_os.serving.cache import cache_get, cache_set
 from retrieval_os.serving.embed_router import embed_text
 from retrieval_os.serving.fusion import reciprocal_rank_fusion, sparse_search
 from retrieval_os.serving.index_proxy import IndexHit, vector_search
+from retrieval_os.serving.reranker import rerank
 
 log = logging.getLogger(__name__)
 
@@ -124,9 +125,9 @@ async def execute_retrieval(
     else:
         hits = dense_hits
 
-    # 4. Rerank (stub) ─────────────────────────────────────────────────────────
+    # 4. Rerank ────────────────────────────────────────────────────────────────
     if reranker and rerank_top_k:
-        hits = _rerank_stub(hits, query=query, reranker=reranker, top_k=rerank_top_k)
+        hits = await rerank(hits, query=query, reranker=reranker, top_k=rerank_top_k)
 
     # 5. Build result ──────────────────────────────────────────────────────────
     chunks = [
@@ -157,13 +158,3 @@ def _record_latency(plan_name: str, start: float) -> None:
     metrics.retrieval_requests_total.labels(plan_name=plan_name).inc()
 
 
-def _rerank_stub(
-    hits: list[IndexHit],
-    *,
-    query: str,
-    reranker: str,
-    top_k: int,
-) -> list[IndexHit]:
-    """Reranking placeholder — Phase 8 will integrate a cross-encoder or Cohere."""
-    log.debug("rerank.stub", extra={"reranker": reranker, "top_k": top_k})
-    return hits[:top_k]

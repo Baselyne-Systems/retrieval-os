@@ -9,8 +9,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from retrieval_os.serving.cache import _cache_key, cache_get, cache_set
-from retrieval_os.serving.executor import RetrievedChunk, _rerank_stub
-from retrieval_os.serving.index_proxy import IndexHit
+from retrieval_os.serving.executor import RetrievedChunk
 from retrieval_os.serving.schemas import ChunkResponse, QueryRequest, QueryResponse
 
 # ── Cache key ─────────────────────────────────────────────────────────────────
@@ -99,27 +98,6 @@ class TestCacheGetSet:
             result = await cache_get("docs", 1, "query", 10)
         assert result is None
 
-
-# ── Rerank stub ───────────────────────────────────────────────────────────────
-
-class TestRerankStub:
-    def _hits(self, n: int) -> list[IndexHit]:
-        return [IndexHit(id=str(i), score=float(n - i), payload={}) for i in range(n)]
-
-    def test_truncates_to_top_k(self) -> None:
-        hits = self._hits(10)
-        result = _rerank_stub(hits, query="q", reranker="cross-encoder", top_k=3)
-        assert len(result) == 3
-
-    def test_preserves_original_order(self) -> None:
-        hits = self._hits(5)
-        result = _rerank_stub(hits, query="q", reranker="cross-encoder", top_k=5)
-        assert [h.id for h in result] == ["0", "1", "2", "3", "4"]
-
-    def test_top_k_larger_than_hits_returns_all(self) -> None:
-        hits = self._hits(3)
-        result = _rerank_stub(hits, query="q", reranker="cross-encoder", top_k=10)
-        assert len(result) == 3
 
 
 # ── RetrievedChunk ─────────────────────────────────────────────────────────────

@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     otel_enabled: bool = True
     otel_service_name: str = "retrieval-os-api"
 
+    # ── Optional external API keys ────────────────────────────────────────────
+    cohere_api_key: str | None = None
+
     # ── Auth & Rate limiting ───────────────────────────────────────────────────
     auth_enabled: bool = False          # Enable API key authentication
     api_key_header: str = "X-API-Key"   # Header name for the API key

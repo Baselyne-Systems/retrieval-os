@@ -102,6 +102,71 @@ async def vector_search(
     raise IndexBackendError(f"Unknown index backend: '{backend}'")
 
 
+async def ensure_collection(
+    *,
+    backend: str,
+    collection: str,
+    dimension: int,
+    distance: str = "cosine",
+) -> bool:
+    """Create *collection* if it does not already exist.
+
+    Args:
+        backend:    "qdrant" (pgvector planned).
+        collection: Collection / table name.
+        dimension:  Embedding vector dimensionality.
+        distance:   "cosine", "dot", or "euclidean".
+
+    Returns:
+        True if the collection was newly created, False if it already existed.
+    """
+    if backend == "qdrant":
+        return await _qdrant_ensure_collection(
+            collection=collection, dimension=dimension, distance=distance
+        )
+    if backend == "pgvector":
+        raise IndexBackendError("pgvector backend is not yet implemented.")
+    raise IndexBackendError(f"Unknown index backend: '{backend}'")
+
+
+async def _qdrant_ensure_collection(
+    *,
+    collection: str,
+    dimension: int,
+    distance: str,
+) -> bool:
+    from qdrant_client.http.models import Distance, VectorParams  # type: ignore[import]
+
+    _DISTANCE_MAP = {
+        "cosine": Distance.COSINE,
+        "dot": Distance.DOT,
+        "euclidean": Distance.EUCLID,
+    }
+
+    client = _get_qdrant()
+    try:
+        await client.get_collection(collection)
+        return False  # already exists
+    except Exception:
+        pass  # not found — create it
+
+    qdrant_distance = _DISTANCE_MAP.get(distance.lower(), Distance.COSINE)
+    try:
+        await client.create_collection(
+            collection_name=collection,
+            vectors_config=VectorParams(size=dimension, distance=qdrant_distance),
+        )
+        log.info(
+            "index_proxy.collection_created",
+            extra={"collection": collection, "dimension": dimension, "distance": distance},
+        )
+    except Exception as exc:
+        raise IndexBackendError(
+            f"Failed to create Qdrant collection '{collection}': {exc}"
+        ) from exc
+    return True
+
+
 async def upsert_vectors(
     *,
     backend: str,

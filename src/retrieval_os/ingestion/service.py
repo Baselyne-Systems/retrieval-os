@@ -36,7 +36,7 @@ from retrieval_os.lineage.models import (
 from retrieval_os.lineage.repository import lineage_repo
 from retrieval_os.plans.models import PlanVersion, RetrievalPlan
 from retrieval_os.serving.embed_router import embed_text
-from retrieval_os.serving.index_proxy import upsert_vectors
+from retrieval_os.serving.index_proxy import ensure_collection, upsert_vectors
 from retrieval_os.webhooks.delivery import fire_webhook_event
 from retrieval_os.webhooks.events import WebhookEvent
 
@@ -279,6 +279,7 @@ async def process_next_ingestion_job(session: AsyncSession) -> str | None:
         total_chunks = len(all_chunks)
         indexed_chunks = 0
         failed_chunks = 0
+        collection_ensured = False
 
         # 4. Embed + upsert in batches
         for batch_start in range(0, total_chunks, _EMBED_BATCH_SIZE):
@@ -292,6 +293,16 @@ async def process_next_ingestion_job(session: AsyncSession) -> str | None:
                     normalize=pv.embedding_normalize,
                     batch_size=pv.embedding_batch_size,
                 )
+                # Ensure the Qdrant collection exists before the first upsert,
+                # using the actual embedding dimension from the first batch.
+                if not collection_ensured and vectors:
+                    await ensure_collection(
+                        backend=pv.index_backend,
+                        collection=pv.index_collection,
+                        dimension=len(vectors[0]),
+                        distance=pv.distance_metric,
+                    )
+                    collection_ensured = True
                 points = [
                     {"id": c["id"], "vector": v, "payload": c["payload"]}
                     for c, v in zip(batch, vectors)
