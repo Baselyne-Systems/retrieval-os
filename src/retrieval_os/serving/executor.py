@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from retrieval_os.core import metrics
 from retrieval_os.serving.cache import cache_get, cache_set
 from retrieval_os.serving.embed_router import embed_text
+from retrieval_os.serving.fusion import reciprocal_rank_fusion, sparse_search
 from retrieval_os.serving.index_proxy import IndexHit, vector_search
 
 log = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ async def execute_retrieval(
     metadata_filters: dict | None,
     cache_enabled: bool,
     cache_ttl_seconds: int,
+    hybrid_alpha: float | None = None,
 ) -> tuple[list[RetrievedChunk], bool]:
     """Execute the retrieval pipeline for a single query.
 
@@ -101,7 +103,7 @@ async def execute_retrieval(
     query_vector = vectors[0]
 
     # 3. Vector search ─────────────────────────────────────────────────────────
-    hits: list[IndexHit] = await vector_search(
+    dense_hits: list[IndexHit] = await vector_search(
         backend=index_backend,
         collection=index_collection,
         vector=query_vector,
@@ -109,6 +111,18 @@ async def execute_retrieval(
         distance_metric=distance_metric,
         metadata_filters=metadata_filters,
     )
+
+    # 3b. Hybrid: fuse dense + sparse via RRF when hybrid_alpha is configured.
+    # hybrid_alpha=1.0 → pure dense; 0.0 → pure sparse (sparse stub returns []).
+    if hybrid_alpha is not None and hybrid_alpha < 1.0:
+        sparse_hits = await sparse_search(
+            collection=index_collection,
+            query=query,
+            top_k=top_k,
+        )
+        hits = reciprocal_rank_fusion([dense_hits, sparse_hits], top_k=top_k)
+    else:
+        hits = dense_hits
 
     # 4. Rerank (stub) ─────────────────────────────────────────────────────────
     if reranker and rerank_top_k:

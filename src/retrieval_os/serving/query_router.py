@@ -66,6 +66,7 @@ async def _load_plan_config(
         "metadata_filters": version.metadata_filters,
         "cache_enabled": version.cache_enabled,
         "cache_ttl_seconds": version.cache_ttl_seconds,
+        "hybrid_alpha": version.hybrid_alpha,
     }
 
     try:
@@ -118,6 +119,7 @@ async def route_query(
         metadata_filters=filters or None,
         cache_enabled=config["cache_enabled"],
         cache_ttl_seconds=config["cache_ttl_seconds"],
+        hybrid_alpha=config.get("hybrid_alpha"),
     )
 
     info = {

@@ -11,6 +11,7 @@ import time
 from typing import Any
 
 from retrieval_os.core import metrics
+from retrieval_os.core.circuit_breaker import get_index_breaker
 from retrieval_os.core.config import settings
 from retrieval_os.core.exceptions import IndexBackendError
 
@@ -84,8 +85,10 @@ async def vector_search(
     Returns:
         List of IndexHit sorted by score descending.
     """
+    breaker = get_index_breaker(backend)
     if backend == "qdrant":
-        return await _qdrant_search(
+        return await breaker.call(
+            _qdrant_search,
             collection=collection,
             vector=vector,
             top_k=top_k,
@@ -94,7 +97,7 @@ async def vector_search(
         )
     if backend == "pgvector":
         raise IndexBackendError(
-            "pgvector backend is not yet implemented. Planned for Phase 8."
+            "pgvector backend is not yet implemented. Planned for Phase 9."
         )
     raise IndexBackendError(f"Unknown index backend: '{backend}'")
 

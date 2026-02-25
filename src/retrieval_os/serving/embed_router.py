@@ -13,6 +13,7 @@ import time
 from typing import Any
 
 from retrieval_os.core import metrics
+from retrieval_os.core.circuit_breaker import get_embed_breaker
 from retrieval_os.core.config import settings
 from retrieval_os.core.exceptions import EmbeddingProviderError
 
@@ -79,8 +80,10 @@ async def embed_text(
         List of float vectors, shape (len(texts), embedding_dimensions).
     """
     start = time.perf_counter()
+    breaker = get_embed_breaker(provider)
     try:
-        vectors = await _dispatch_text(
+        vectors = await breaker.call(
+            _dispatch_text,
             texts, provider=provider, model=model,
             normalize=normalize, batch_size=batch_size,
         )
