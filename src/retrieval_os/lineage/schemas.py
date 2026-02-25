@@ -59,12 +59,14 @@ class EdgeResponse(BaseModel):
 
 class ArtifactWithEdgesResponse(ArtifactResponse):
     """Artifact plus its immediate parents and children."""
+
     parents: list[ArtifactResponse] = []
     children: list[ArtifactResponse] = []
 
 
 class LineageGraphResponse(BaseModel):
     """Full lineage graph for a plan — all reachable artifacts and their edges."""
+
     plan_name: str
     artifacts: list[ArtifactResponse]
     edges: list[EdgeResponse]
@@ -72,5 +74,6 @@ class LineageGraphResponse(BaseModel):
 
 class OrphansResponse(BaseModel):
     """Artifacts not reachable from any active deployment."""
+
     total: int
     artifacts: list[ArtifactResponse]

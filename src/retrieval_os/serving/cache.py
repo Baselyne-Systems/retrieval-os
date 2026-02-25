@@ -24,9 +24,7 @@ def _cache_key(plan_name: str, version: int, query: str, top_k: int) -> str:
     return f"{_PREFIX}{digest}"
 
 
-async def cache_get(
-    plan_name: str, version: int, query: str, top_k: int
-) -> list[dict] | None:
+async def cache_get(plan_name: str, version: int, query: str, top_k: int) -> list[dict] | None:
     """Return cached chunks or None on miss."""
     key = _cache_key(plan_name, version, query, top_k)
     redis = await get_redis()

@@ -41,6 +41,7 @@ def _base_config(**overrides: object) -> dict:
 
 # ── validate_plan_config ───────────────────────────────────────────────────────
 
+
 class TestValidatePlanConfig:
     def test_valid_config_passes(self) -> None:
         validate_plan_config(_base_config())  # should not raise
@@ -101,16 +102,12 @@ class TestValidatePlanConfig:
     def test_provider_modality_mismatch_raises(self) -> None:
         # openai only supports text; asking for image should fail
         with pytest.raises(AppValidationError) as exc_info:
-            validate_plan_config(
-                _base_config(embedding_provider="openai", modalities=["image"])
-            )
+            validate_plan_config(_base_config(embedding_provider="openai", modalities=["image"]))
         errors = exc_info.value.detail["errors"]
         assert any("openai" in e for e in errors)
 
     def test_clip_supports_text_and_image(self) -> None:
-        validate_plan_config(
-            _base_config(embedding_provider="clip", modalities=["text", "image"])
-        )
+        validate_plan_config(_base_config(embedding_provider="clip", modalities=["text", "image"]))
 
     # top_k / rerank_top_k
     def test_top_k_zero_raises(self) -> None:
@@ -169,6 +166,7 @@ class TestValidatePlanConfig:
 
 
 # ── compute_config_hash ────────────────────────────────────────────────────────
+
 
 class TestComputeConfigHash:
     def test_same_config_same_hash(self) -> None:

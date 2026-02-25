@@ -109,7 +109,7 @@ class TestRRFFusion:
 
     def test_disjoint_lists_sorted_by_rank(self) -> None:
         """With disjoint lists, rank-1 items should appear before rank-2 items."""
-        dense = [_hit("d1"), _hit("d2")]   # d1=1/(60+1), d2=1/(60+2)
+        dense = [_hit("d1"), _hit("d2")]  # d1=1/(60+1), d2=1/(60+2)
         sparse = [_hit("s1"), _hit("s2")]  # s1=1/(60+1), s2=1/(60+2)
         result = reciprocal_rank_fusion([dense, sparse], top_k=4)
         # d1 and s1 both have score 1/61; d2 and s2 both have 1/62

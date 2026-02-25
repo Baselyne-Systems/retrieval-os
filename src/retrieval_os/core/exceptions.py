@@ -17,6 +17,7 @@ class RetrievalOSError(Exception):
 
 # ── 404 Not Found ─────────────────────────────────────────────────────────────
 
+
 class NotFoundError(RetrievalOSError):
     status_code = 404
     error_code = "NOT_FOUND"
@@ -48,6 +49,7 @@ class EvalJobNotFoundError(NotFoundError):
 
 # ── 409 Conflict ──────────────────────────────────────────────────────────────
 
+
 class ConflictError(RetrievalOSError):
     status_code = 409
     error_code = "CONFLICT"
@@ -67,6 +69,7 @@ class DeploymentLockError(ConflictError):
 
 # ── 422 Validation ────────────────────────────────────────────────────────────
 
+
 class AppValidationError(RetrievalOSError):
     status_code = 422
     error_code = "VALIDATION_ERROR"
@@ -77,6 +80,7 @@ class LineageCycleError(AppValidationError):
 
 
 # ── 503 Upstream Unavailable ──────────────────────────────────────────────────
+
 
 class UpstreamError(RetrievalOSError):
     status_code = 503
@@ -97,12 +101,14 @@ class CircuitOpenError(UpstreamError):
 
 # ── 401 Authentication ─────────────────────────────────────────────────────────
 
+
 class AuthenticationError(RetrievalOSError):
     status_code = 401
     error_code = "AUTHENTICATION_REQUIRED"
 
 
 # ── 429 Rate Limit ────────────────────────────────────────────────────────────
+
 
 class RateLimitError(RetrievalOSError):
     status_code = 429

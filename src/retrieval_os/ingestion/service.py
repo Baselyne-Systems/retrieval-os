@@ -48,9 +48,7 @@ _EMBED_BATCH_SIZE = 50
 # ── Plan-version loader ────────────────────────────────────────────────────────
 
 
-async def _load_plan_version(
-    session: AsyncSession, plan_name: str, version: int
-) -> PlanVersion:
+async def _load_plan_version(session: AsyncSession, plan_name: str, version: int) -> PlanVersion:
     result = await session.execute(
         select(PlanVersion)
         .join(RetrievalPlan, PlanVersion.plan_id == RetrievalPlan.id)
@@ -60,9 +58,7 @@ async def _load_plan_version(
     if pv is None:
         from retrieval_os.core.exceptions import PlanVersionNotFoundError
 
-        raise PlanVersionNotFoundError(
-            f"Plan '{plan_name}' version {version} not found"
-        )
+        raise PlanVersionNotFoundError(f"Plan '{plan_name}' version {version} not found")
     return pv
 
 

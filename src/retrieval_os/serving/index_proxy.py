@@ -34,8 +34,7 @@ def _get_qdrant() -> Any:
             )
         except ImportError:
             raise IndexBackendError(
-                "qdrant-client is not installed. "
-                "Install with: uv add qdrant-client"
+                "qdrant-client is not installed. Install with: uv add qdrant-client"
             )
     return _qdrant_client
 
@@ -96,9 +95,7 @@ async def vector_search(
             score_threshold=score_threshold,
         )
     if backend == "pgvector":
-        raise IndexBackendError(
-            "pgvector backend is not yet implemented. Planned for Phase 9."
-        )
+        raise IndexBackendError("pgvector backend is not yet implemented. Planned for Phase 9.")
     raise IndexBackendError(f"Unknown index backend: '{backend}'")
 
 

@@ -35,6 +35,7 @@ class TestEncodeImagesClip:
 
         # Clear cached singleton so it re-imports
         import retrieval_os.serving.multimodal as mm
+
         mm._clip_state.clear()
 
         with pytest.raises(EmbeddingProviderError, match="open-clip-torch"):
@@ -69,6 +70,7 @@ class TestTranscribeAudioWhisper:
         monkeypatch.setattr(builtins, "__import__", mock_import)
 
         import retrieval_os.serving.multimodal as mm
+
         mm._whisper_state.clear()
 
         with pytest.raises(EmbeddingProviderError, match="faster-whisper"):

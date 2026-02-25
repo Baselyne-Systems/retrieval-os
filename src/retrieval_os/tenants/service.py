@@ -43,9 +43,9 @@ def generate_api_key() -> tuple[str, str, str]:
         - ``prefix``    is ``ros_<8-hex>`` (12 chars) used for DB lookup.
         - ``hash_hex``  is ``SHA-256(full_key)`` stored in the DB.
     """
-    random_hex = secrets.token_hex(_KEY_RANDOM_BYTES)      # 64 hex chars
-    prefix = f"ros_{random_hex[:8]}"                        # "ros_" + 8 hex = 12 chars
-    full_key = f"{prefix}_{random_hex[8:]}"                 # 12 + 1 + 56 = 69 chars
+    random_hex = secrets.token_hex(_KEY_RANDOM_BYTES)  # 64 hex chars
+    prefix = f"ros_{random_hex[:8]}"  # "ros_" + 8 hex = 12 chars
+    full_key = f"{prefix}_{random_hex[8:]}"  # 12 + 1 + 56 = 69 chars
     hash_hex = hashlib.sha256(full_key.encode()).hexdigest()
     return full_key, prefix, hash_hex
 

@@ -48,8 +48,13 @@ class TestInitialState:
         assert cb.state == CircuitState.CLOSED
 
     def test_name_stored(self) -> None:
-        cb = CircuitBreaker("my-breaker", failure_threshold=1, window_seconds=1.0,
-                            reset_timeout_seconds=1.0, half_open_success_threshold=1)
+        cb = CircuitBreaker(
+            "my-breaker",
+            failure_threshold=1,
+            window_seconds=1.0,
+            reset_timeout_seconds=1.0,
+            half_open_success_threshold=1,
+        )
         assert cb.name == "my-breaker"
 
 

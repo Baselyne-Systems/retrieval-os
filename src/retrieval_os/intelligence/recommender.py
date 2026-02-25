@@ -15,14 +15,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 # Thresholds
-_LOW_CACHE_HIT_RATE = 0.30      # below this → recommend cache tuning
+_LOW_CACHE_HIT_RATE = 0.30  # below this → recommend cache tuning
 _HIGH_COST_PER_QUERY_USD = 0.001  # above this → recommend cheaper model
-_HIGH_TOP_K = 20                # above this → recommend reducing top_k
+_HIGH_TOP_K = 20  # above this → recommend reducing top_k
 
 
 @dataclass(frozen=True)
 class PlanStats:
     """Aggregated stats for one plan, fed to the recommender."""
+
     plan_name: str
     total_queries: int
     cache_hits: int
@@ -36,8 +37,8 @@ class PlanStats:
 @dataclass(frozen=True)
 class Recommendation:
     plan_name: str
-    category: str           # "cache" | "model" | "top_k"
-    priority: str           # "high" | "medium" | "low"
+    category: str  # "cache" | "model" | "top_k"
+    priority: str  # "high" | "medium" | "low"
     message: str
     potential_savings_pct: float | None
 

@@ -32,6 +32,7 @@ from retrieval_os.deployments.schemas import (
     RollbackRequest,
 )
 from retrieval_os.deployments.traffic import clear_active_deployment, set_active_deployment
+from retrieval_os.evaluations.repository import eval_repo
 from retrieval_os.plans.repository import plan_repo
 from retrieval_os.webhooks.delivery import fire_webhook_event
 from retrieval_os.webhooks.events import WebhookEvent
@@ -89,9 +90,7 @@ async def create_deployment(
         )
 
     # 4. Validate gradual rollout params
-    if (request.rollout_step_percent is None) != (
-        request.rollout_step_interval_seconds is None
-    ):
+    if (request.rollout_step_percent is None) != (request.rollout_step_interval_seconds is None):
         raise AppValidationError(
             "rollout_step_percent and rollout_step_interval_seconds "
             "must both be provided or both omitted"
@@ -234,9 +233,7 @@ async def get_deployment(
     return DeploymentResponse.model_validate(deployment)
 
 
-async def list_deployments(
-    session: AsyncSession, plan_name: str
-) -> list[DeploymentResponse]:
+async def list_deployments(session: AsyncSession, plan_name: str) -> list[DeploymentResponse]:
     plan = await plan_repo.get_by_name(session, plan_name)
     if not plan:
         raise PlanNotFoundError(f"Plan '{plan_name}' not found")
@@ -283,9 +280,9 @@ async def step_rolling_deployments(session: AsyncSession) -> int:
                 },
                 session,
             )
-            metrics.rollout_duration_seconds.labels(
-                plan_name=deployment.plan_name
-            ).observe((now - deployment.created_at).total_seconds())
+            metrics.rollout_duration_seconds.labels(plan_name=deployment.plan_name).observe(
+                (now - deployment.created_at).total_seconds()
+            )
         else:
             await deployment_repo.update_status(
                 session,
@@ -308,13 +305,107 @@ async def step_rolling_deployments(session: AsyncSession) -> int:
 # ── Rollback watchdog (called by background loop) ─────────────────────────────
 
 
-async def check_rollback_thresholds(session: AsyncSession) -> int:
-    """Trigger automatic rollback for deployments that breach guard rails.
+async def _watchdog_rollback(
+    session: AsyncSession,
+    deployment: Deployment,
+    reason: str,
+) -> None:
+    """Roll back a live deployment due to a guard-rail breach.
 
-    Phase 6 (Evaluation) populates the metrics this watchdog reads.
-    For now this is a no-op stub that returns 0 — the infrastructure is wired.
+    Bypasses the user-facing validation in ``rollback_deployment`` since the
+    caller already knows the deployment is live.
+    """
+    now = datetime.now(UTC)
+    await deployment_repo.update_status(
+        session,
+        deployment.id,
+        DeploymentStatus.ROLLED_BACK.value,
+        traffic_weight=0.0,
+        rolled_back_at=now,
+        rollback_reason=reason,
+        updated_at=now,
+    )
+    await clear_active_deployment(deployment.plan_name)
+    await fire_webhook_event(
+        WebhookEvent.DEPLOYMENT_STATUS_CHANGED,
+        {
+            "deployment_id": deployment.id,
+            "plan_name": deployment.plan_name,
+            "status": DeploymentStatus.ROLLED_BACK.value,
+            "reason": reason,
+            "triggered_by": "watchdog",
+        },
+        session,
+    )
+    metrics.rollback_events_total.labels(
+        deployment_id=deployment.id,
+        plan_name=deployment.plan_name,
+        triggered_by="watchdog",
+    ).inc()
+    log.warning(
+        "deployment.watchdog.rollback",
+        extra={
+            "deployment_id": deployment.id,
+            "plan_name": deployment.plan_name,
+            "reason": reason,
+        },
+    )
+
+
+async def check_rollback_thresholds(session: AsyncSession) -> int:
+    """Trigger automatic rollback for live deployments that breach guard rails.
+
+    For each ACTIVE / ROLLING_OUT deployment that has thresholds configured,
+    loads the latest COMPLETED eval job for the same plan and checks:
+
+    - ``recall_at_5 < rollback_recall_threshold``  (if the threshold is set)
+    - ``failed_queries / total_queries > rollback_error_rate_threshold``
+      (if the threshold is set and total_queries > 0)
+
+    Triggers ``_watchdog_rollback`` on the first breach found per deployment.
 
     Returns the number of rollbacks triggered.
     """
-    # Phase 6 will populate eval metrics into Redis; watchdog reads them here.
-    return 0
+    live = await deployment_repo.list_live(session)
+    triggered = 0
+
+    for deployment in live:
+        has_recall = deployment.rollback_recall_threshold is not None
+        has_error = deployment.rollback_error_rate_threshold is not None
+        if not has_recall and not has_error:
+            continue  # no guard rails configured → skip
+
+        latest_eval = await eval_repo.get_latest_completed_for_plan(session, deployment.plan_name)
+        if latest_eval is None:
+            continue  # no eval data yet → skip
+
+        should_rollback = False
+        reason = ""
+
+        # ── Recall@5 guard rail ───────────────────────────────────────────────
+        if has_recall and latest_eval.recall_at_5 is not None:
+            if latest_eval.recall_at_5 < deployment.rollback_recall_threshold:  # type: ignore[operator]
+                should_rollback = True
+                reason = (
+                    f"recall@5 {latest_eval.recall_at_5:.4f} "
+                    f"< threshold {deployment.rollback_recall_threshold:.4f}"
+                )
+
+        # ── Error-rate guard rail ─────────────────────────────────────────────
+        if not should_rollback and has_error:
+            total = latest_eval.total_queries or 0
+            failed = latest_eval.failed_queries or 0
+            if total > 0:
+                error_rate = failed / total
+                if error_rate > deployment.rollback_error_rate_threshold:  # type: ignore[operator]
+                    should_rollback = True
+                    reason = (
+                        f"error_rate {error_rate:.4f} "
+                        f"> threshold {deployment.rollback_error_rate_threshold:.4f}"
+                    )
+
+        if should_rollback:
+            await _watchdog_rollback(session, deployment, reason)
+            triggered += 1
+
+    return triggered

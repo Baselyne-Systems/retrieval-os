@@ -19,8 +19,8 @@ def uuid7() -> uuid.UUID:
     timestamp_ms = int(time.time() * 1000)
     rand = int.from_bytes(os.urandom(10), "big")
 
-    rand_a = (rand >> 62) & 0x0FFF       # 12 bits
-    rand_b = rand & 0x3FFFFFFFFFFFFFFF   # 62 bits
+    rand_a = (rand >> 62) & 0x0FFF  # 12 bits
+    rand_b = rand & 0x3FFFFFFFFFFFFFFF  # 62 bits
 
     high = (timestamp_ms << 16) | 0x7000 | rand_a
     low = 0x8000000000000000 | rand_b

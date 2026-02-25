@@ -14,6 +14,7 @@ from retrieval_os.serving.schemas import ChunkResponse, QueryRequest, QueryRespo
 
 # ── Cache key ─────────────────────────────────────────────────────────────────
 
+
 class TestCacheKey:
     def test_deterministic(self) -> None:
         k1 = _cache_key("docs", 1, "what is RAG?", 10)
@@ -52,6 +53,7 @@ class TestCacheKey:
 
 
 # ── Cache get/set ─────────────────────────────────────────────────────────────
+
 
 class TestCacheGetSet:
     @pytest.fixture
@@ -99,14 +101,12 @@ class TestCacheGetSet:
         assert result is None
 
 
-
 # ── RetrievedChunk ─────────────────────────────────────────────────────────────
+
 
 class TestRetrievedChunk:
     def test_to_dict_has_all_fields(self) -> None:
-        chunk = RetrievedChunk(
-            id="abc", score=0.85, text="Some text", metadata={"source": "doc1"}
-        )
+        chunk = RetrievedChunk(id="abc", score=0.85, text="Some text", metadata={"source": "doc1"})
         d = chunk.to_dict()
         assert d == {
             "id": "abc",
@@ -117,6 +117,7 @@ class TestRetrievedChunk:
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
+
 
 class TestQuerySchemas:
     def test_query_request_valid(self) -> None:
@@ -137,9 +138,7 @@ class TestQuerySchemas:
             plan_name="docs",
             version=2,
             cache_hit=False,
-            results=[
-                ChunkResponse(id="1", score=0.9, text="hi", metadata={})
-            ],
+            results=[ChunkResponse(id="1", score=0.9, text="hi", metadata={})],
             result_count=1,
         )
         assert resp.result_count == 1

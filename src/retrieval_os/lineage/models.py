@@ -29,9 +29,9 @@ class ArtifactType(StrEnum):
 
 
 class EdgeRelationship(StrEnum):
-    PRODUCED_FROM = "produced_from"   # EmbeddingArtifact ← DatasetSnapshot
-    DERIVED_FROM = "derived_from"     # IndexArtifact ← EmbeddingArtifact
-    DEPLOYED_AS = "deployed_as"       # plan version → IndexArtifact
+    PRODUCED_FROM = "produced_from"  # EmbeddingArtifact ← DatasetSnapshot
+    DERIVED_FROM = "derived_from"  # IndexArtifact ← EmbeddingArtifact
+    DEPLOYED_AS = "deployed_as"  # plan version → IndexArtifact
 
 
 class LineageArtifact(Base):
@@ -57,9 +57,7 @@ class LineageArtifact(Base):
     # Type-specific metadata: chunk_count, dimension_count, model_name, etc.
     # Column is "metadata" in DB; attribute renamed to avoid collision with
     # SQLAlchemy DeclarativeBase.metadata reserved name.
-    artifact_metadata: Mapped[dict | None] = mapped_column(
-        "metadata", JSONB, nullable=True
-    )
+    artifact_metadata: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
 
@@ -89,7 +87,8 @@ class LineageEdge(Base):
     __tablename__ = "lineage_edges"
     __table_args__ = (
         UniqueConstraint(
-            "parent_artifact_id", "child_artifact_id",
+            "parent_artifact_id",
+            "child_artifact_id",
             name="uq_lineage_edge",
         ),
     )

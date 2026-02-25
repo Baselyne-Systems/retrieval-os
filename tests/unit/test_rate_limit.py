@@ -158,9 +158,7 @@ class TestRateLimitMiddlewareSkips:
         app = Starlette(routes=[Route("/", homepage)])
         app.add_middleware(RateLimitMiddleware)
 
-        with _patch(
-            "retrieval_os.api.middleware.rate_limit.settings"
-        ) as mock_settings:
+        with _patch("retrieval_os.api.middleware.rate_limit.settings") as mock_settings:
             mock_settings.rate_limit_enabled = False
             client = TestClient(app, raise_server_exceptions=True)
             resp = client.get("/")

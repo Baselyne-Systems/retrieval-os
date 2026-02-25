@@ -119,7 +119,4 @@ async def sparse_vector_search(
         )
         return []
 
-    return [
-        IndexHit(id=str(r.id), score=r.score, payload=r.payload or {})
-        for r in results
-    ]
+    return [IndexHit(id=str(r.id), score=r.score, payload=r.payload or {}) for r in results]

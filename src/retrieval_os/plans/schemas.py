@@ -22,6 +22,7 @@ def _validate_slug(v: str, field_name: str = "name") -> str:
 
 # ── Request schemas ────────────────────────────────────────────────────────────
 
+
 class PlanVersionConfig(BaseModel):
     """All fields that define the retrieval behaviour of a plan version."""
 
@@ -88,6 +89,7 @@ class ClonePlanRequest(BaseModel):
 
 # ── Response schemas ───────────────────────────────────────────────────────────
 
+
 class PlanVersionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -139,6 +141,7 @@ class PlanResponse(BaseModel):
 
 
 # ── Cursor pagination helpers ──────────────────────────────────────────────────
+
 
 def encode_cursor(offset: int) -> str:
     return base64.b64encode(str(offset).encode()).decode()

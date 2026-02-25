@@ -19,9 +19,7 @@ async def get_tenant_by_name(db: AsyncSession, name: str) -> Tenant | None:
 
 
 async def list_tenants(db: AsyncSession) -> list[Tenant]:
-    result = await db.execute(
-        select(Tenant).order_by(Tenant.created_at.desc())
-    )
+    result = await db.execute(select(Tenant).order_by(Tenant.created_at.desc()))
     return list(result.scalars().all())
 
 
@@ -45,9 +43,7 @@ async def get_api_key_by_prefix_and_hash(
 
 async def list_api_keys(db: AsyncSession, tenant_id: str) -> list[ApiKey]:
     result = await db.execute(
-        select(ApiKey)
-        .where(ApiKey.tenant_id == tenant_id)
-        .order_by(ApiKey.created_at.desc())
+        select(ApiKey).where(ApiKey.tenant_id == tenant_id).order_by(ApiKey.created_at.desc())
     )
     return list(result.scalars().all())
 

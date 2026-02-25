@@ -56,6 +56,7 @@ log = structlog.get_logger(__name__)
 
 # ── Lifespan ───────────────────────────────────────────────────────────────────
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # ── Startup ───────────────────────────────────────────────────────────────
@@ -115,6 +116,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 # ── App factory ────────────────────────────────────────────────────────────────
 
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Retrieval-OS",
@@ -141,9 +143,7 @@ def create_app() -> FastAPI:
 
     # ── Exception handlers ─────────────────────────────────────────────────────
     @app.exception_handler(RetrievalOSError)
-    async def handle_retrieval_os_error(
-        request: Request, exc: RetrievalOSError
-    ) -> JSONResponse:
+    async def handle_retrieval_os_error(request: Request, exc: RetrievalOSError) -> JSONResponse:
         return JSONResponse(
             status_code=exc.status_code,
             content={

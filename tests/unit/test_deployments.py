@@ -10,6 +10,7 @@ from retrieval_os.deployments.models import Deployment, DeploymentStatus
 
 # ── DeploymentStatus enum ──────────────────────────────────────────────────────
 
+
 class TestDeploymentStatus:
     def test_all_expected_statuses_exist(self) -> None:
         statuses = {s.value for s in DeploymentStatus}
@@ -28,6 +29,7 @@ class TestDeploymentStatus:
 
 
 # ── Deployment.is_live ────────────────────────────────────────────────────────
+
 
 class TestDeploymentIsLive:
     def _make(self, status: str) -> Deployment:
@@ -60,6 +62,7 @@ class TestDeploymentIsLive:
 
 
 # ── Deployment schemas ────────────────────────────────────────────────────────
+
 
 class TestDeploymentSchemas:
     def test_create_request_valid(self) -> None:
@@ -104,6 +107,7 @@ class TestDeploymentSchemas:
 
 
 # ── Traffic helpers ───────────────────────────────────────────────────────────
+
 
 class TestTrafficKeys:
     def test_active_key_format(self) -> None:

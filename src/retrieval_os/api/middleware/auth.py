@@ -38,8 +38,8 @@ def _extract_prefix(key: str) -> str | None:
     """
     if not key.startswith("ros_"):
         return None
-    parts = key.split("_", 2)   # ["ros", "<8-hex>", "<rest>"]
-    if len(parts) < 3:           # noqa: PLR2004
+    parts = key.split("_", 2)  # ["ros", "<8-hex>", "<rest>"]
+    if len(parts) < 3:  # noqa: PLR2004
         return None
     return f"ros_{parts[1]}"
 

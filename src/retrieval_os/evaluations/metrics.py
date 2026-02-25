@@ -66,8 +66,7 @@ def compute_ndcg_at_k(
         return 0.0
 
     dcg = sum(
-        relevance_scores.get(rid, 0.0) / math.log2(i + 2)
-        for i, rid in enumerate(retrieved_ids[:k])
+        relevance_scores.get(rid, 0.0) / math.log2(i + 2) for i, rid in enumerate(retrieved_ids[:k])
     )
     ideal_scores = sorted(relevance_scores.values(), reverse=True)[:k]
     idcg = sum(score / math.log2(i + 2) for i, score in enumerate(ideal_scores))

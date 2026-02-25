@@ -29,9 +29,7 @@ _REGRESSION_THRESHOLD = 0.05
 _REGRESSION_METRICS = ("recall_at_5", "mrr", "ndcg_at_5")
 
 
-async def _load_plan_version(
-    session: AsyncSession, plan_name: str, version: int
-) -> PlanVersion:
+async def _load_plan_version(session: AsyncSession, plan_name: str, version: int) -> PlanVersion:
     """Load a PlanVersion by (plan_name, version_number)."""
     result = await session.execute(
         select(PlanVersion)
@@ -41,9 +39,8 @@ async def _load_plan_version(
     pv = result.scalar_one_or_none()
     if pv is None:
         from retrieval_os.core.exceptions import PlanVersionNotFoundError
-        raise PlanVersionNotFoundError(
-            f"Plan '{plan_name}' version {version} not found"
-        )
+
+        raise PlanVersionNotFoundError(f"Plan '{plan_name}' version {version} not found")
     return pv
 
 
@@ -115,7 +112,8 @@ async def process_next_eval_job(session: AsyncSession) -> str | None:
         records = await load_eval_dataset(job.dataset_uri)
         if not records:
             await eval_repo.fail_job(
-                session, job_id,
+                session,
+                job_id,
                 error_message="Eval dataset is empty or could not be parsed",
                 total_queries=0,
                 failed_queries=0,
@@ -198,15 +196,13 @@ async def process_next_eval_job(session: AsyncSession) -> str | None:
 
         # Prometheus gauges
         dep_id = f"{job.plan_name}-v{job.plan_version}"
-        metrics.eval_recall_at_k.labels(
-            plan_name=job.plan_name, deployment_id=dep_id, k="5"
-        ).set(results.recall_at_5)
-        metrics.eval_mrr.labels(
-            plan_name=job.plan_name, deployment_id=dep_id
-        ).set(results.mrr)
-        metrics.eval_ndcg_at_k.labels(
-            plan_name=job.plan_name, deployment_id=dep_id, k="5"
-        ).set(results.ndcg_at_5)
+        metrics.eval_recall_at_k.labels(plan_name=job.plan_name, deployment_id=dep_id, k="5").set(
+            results.recall_at_5
+        )
+        metrics.eval_mrr.labels(plan_name=job.plan_name, deployment_id=dep_id).set(results.mrr)
+        metrics.eval_ndcg_at_k.labels(plan_name=job.plan_name, deployment_id=dep_id, k="5").set(
+            results.ndcg_at_5
+        )
 
         elapsed = (datetime.now(UTC) - start).total_seconds()
         metrics.eval_job_duration_seconds.labels(plan_name=job.plan_name).observe(elapsed)
@@ -225,8 +221,6 @@ async def process_next_eval_job(session: AsyncSession) -> str | None:
 
     except Exception as exc:
         log.exception("eval.job.failed", extra={"job_id": job_id})
-        await eval_repo.fail_job(
-            session, job_id, error_message=str(exc)
-        )
+        await eval_repo.fail_job(session, job_id, error_message=str(exc))
 
     return job_id

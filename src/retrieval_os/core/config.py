@@ -17,9 +17,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # ── Database ──────────────────────────────────────────────────────────────
-    database_url: str = (
-        "postgresql+asyncpg://retrieval_os:retrieval_os@localhost:5432/retrieval_os"
-    )
+    database_url: str = "postgresql+asyncpg://retrieval_os:retrieval_os@localhost:5432/retrieval_os"
     database_pool_size: int = 10
     database_max_overflow: int = 20
     database_pool_timeout: int = 30
@@ -52,10 +50,10 @@ class Settings(BaseSettings):
     cohere_api_key: str | None = None
 
     # ── Auth & Rate limiting ───────────────────────────────────────────────────
-    auth_enabled: bool = False          # Enable API key authentication
-    api_key_header: str = "X-API-Key"   # Header name for the API key
-    rate_limit_enabled: bool = False    # Enable per-tenant rate limiting
-    rate_limit_default_rpm: int = 60    # Default max requests/minute per tenant
+    auth_enabled: bool = False  # Enable API key authentication
+    api_key_header: str = "X-API-Key"  # Header name for the API key
+    rate_limit_enabled: bool = False  # Enable per-tenant rate limiting
+    rate_limit_default_rpm: int = 60  # Default max requests/minute per tenant
 
     # ── Background task intervals ─────────────────────────────────────────────
     rollback_watchdog_interval_seconds: int = 30

@@ -56,6 +56,7 @@ async def _verify_s3_artifact(storage_uri: str) -> dict:
                 detail={"storage_uri": storage_uri},
             )
         from retrieval_os.core.s3_client import get_object_metadata
+
         meta = await get_object_metadata(key, bucket=bucket)
         return {
             "s3_size_bytes": meta.get("size_bytes"),
@@ -99,16 +100,12 @@ async def register_artifact(
     )
     artifact = await lineage_repo.create_artifact(session, artifact)
 
-    metrics.lineage_artifacts_total.labels(
-        artifact_type=request.artifact_type.value
-    ).inc()
+    metrics.lineage_artifacts_total.labels(artifact_type=request.artifact_type.value).inc()
 
     return ArtifactResponse.model_validate(artifact)
 
 
-async def get_artifact(
-    session: AsyncSession, artifact_id: str
-) -> ArtifactWithEdgesResponse:
+async def get_artifact(session: AsyncSession, artifact_id: str) -> ArtifactWithEdgesResponse:
     artifact = await lineage_repo.get_artifact(session, artifact_id)
     if not artifact:
         raise ArtifactNotFoundError(f"Artifact '{artifact_id}' not found")
@@ -143,14 +140,10 @@ async def create_edge(
     # 1. Both artifacts must exist
     parent = await lineage_repo.get_artifact(session, request.parent_artifact_id)
     if not parent:
-        raise ArtifactNotFoundError(
-            f"Parent artifact '{request.parent_artifact_id}' not found"
-        )
+        raise ArtifactNotFoundError(f"Parent artifact '{request.parent_artifact_id}' not found")
     child = await lineage_repo.get_artifact(session, request.child_artifact_id)
     if not child:
-        raise ArtifactNotFoundError(
-            f"Child artifact '{request.child_artifact_id}' not found"
-        )
+        raise ArtifactNotFoundError(f"Child artifact '{request.child_artifact_id}' not found")
 
     # 2. Idempotent — return existing edge if it already exists
     if await lineage_repo.edge_exists(
@@ -166,9 +159,7 @@ async def create_edge(
         return EdgeResponse.model_validate(existing_edge)
 
     # 3. Cycle prevention
-    if await would_create_cycle(
-        session, request.parent_artifact_id, request.child_artifact_id
-    ):
+    if await would_create_cycle(session, request.parent_artifact_id, request.child_artifact_id):
         raise LineageCycleError(
             f"Adding edge '{request.parent_artifact_id}' → "
             f"'{request.child_artifact_id}' would create a cycle",
@@ -238,15 +229,10 @@ async def get_plan_lineage_graph(
     returns the full connected subgraph.
     """
     all_artifacts, _ = await lineage_repo.list_artifacts(session, limit=1000)
-    plan_artifacts = [
-        a for a in all_artifacts
-        if a.name.startswith(plan_name)
-    ]
+    plan_artifacts = [a for a in all_artifacts if a.name.startswith(plan_name)]
 
     if not plan_artifacts:
-        return LineageGraphResponse(
-            plan_name=plan_name, artifacts=[], edges=[]
-        )
+        return LineageGraphResponse(plan_name=plan_name, artifacts=[], edges=[])
 
     # Expand to full connected component via ancestor + descendant traversal
     all_ids: set[str] = {a.id for a in plan_artifacts}
@@ -271,9 +257,7 @@ async def get_orphans(session: AsyncSession) -> OrphansResponse:
     orphans = await lineage_repo.get_orphaned_artifacts(session)
     total = len(orphans)
 
-    metrics.lineage_orphaned_artifacts_total.labels(
-        artifact_type="all"
-    ).set(total)
+    metrics.lineage_orphaned_artifacts_total.labels(artifact_type="all").set(total)
 
     return OrphansResponse(
         total=total,

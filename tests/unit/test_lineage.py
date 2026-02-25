@@ -260,10 +260,12 @@ class TestWouldCreateCycle:
         # would create a cycle.
         with patch(
             "retrieval_os.lineage.dag.lineage_repo.get_ancestors",
-            AsyncMock(return_value=[
-                {"artifact_id": "child-B", "depth": 1},
-                {"artifact_id": "grandparent", "depth": 2},
-            ]),
+            AsyncMock(
+                return_value=[
+                    {"artifact_id": "child-B", "depth": 1},
+                    {"artifact_id": "grandparent", "depth": 2},
+                ]
+            ),
         ):
             result = await would_create_cycle(mock_session, "parent-A", "child-B")
         assert result is True
@@ -275,9 +277,11 @@ class TestWouldCreateCycle:
         mock_session = AsyncMock()
         with patch(
             "retrieval_os.lineage.dag.lineage_repo.get_ancestors",
-            AsyncMock(return_value=[
-                {"artifact_id": "some-other-node", "depth": 1},
-            ]),
+            AsyncMock(
+                return_value=[
+                    {"artifact_id": "some-other-node", "depth": 1},
+                ]
+            ),
         ):
             result = await would_create_cycle(mock_session, "parent-A", "child-B")
         assert result is False
@@ -306,11 +310,13 @@ class TestComputeDagDepth:
         mock_session = AsyncMock()
         with patch(
             "retrieval_os.lineage.dag.lineage_repo.get_descendants",
-            AsyncMock(return_value=[
-                {"artifact_id": "child", "depth": 1},
-                {"artifact_id": "grandchild", "depth": 2},
-                {"artifact_id": "great-grandchild", "depth": 3},
-            ]),
+            AsyncMock(
+                return_value=[
+                    {"artifact_id": "child", "depth": 1},
+                    {"artifact_id": "grandchild", "depth": 2},
+                    {"artifact_id": "great-grandchild", "depth": 3},
+                ]
+            ),
         ):
             depth = await compute_dag_depth(mock_session, "root-id")
         assert depth == 3

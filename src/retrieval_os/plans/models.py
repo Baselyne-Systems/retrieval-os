@@ -25,9 +25,7 @@ from retrieval_os.core.ids import uuid7
 class RetrievalPlan(Base):
     __tablename__ = "retrieval_plans"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        PG_UUID(as_uuid=True), primary_key=True, default=uuid7
-    )
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid7)
     name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -54,9 +52,7 @@ class PlanVersion(Base):
         UniqueConstraint("plan_id", "config_hash", name="uq_plan_config_hash"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        PG_UUID(as_uuid=True), primary_key=True, default=uuid7
-    )
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid7)
     plan_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("retrieval_plans.id"), nullable=False
     )

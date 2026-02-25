@@ -14,28 +14,18 @@ from retrieval_os.plans.models import PlanVersion, RetrievalPlan
 class PlanRepository:
     # ── RetrievalPlan ──────────────────────────────────────────────────────────
 
-    async def create_plan(
-        self, session: AsyncSession, plan: RetrievalPlan
-    ) -> RetrievalPlan:
+    async def create_plan(self, session: AsyncSession, plan: RetrievalPlan) -> RetrievalPlan:
         session.add(plan)
         await session.flush()
         await session.refresh(plan)
         return plan
 
-    async def get_by_name(
-        self, session: AsyncSession, name: str
-    ) -> RetrievalPlan | None:
-        result = await session.execute(
-            select(RetrievalPlan).where(RetrievalPlan.name == name)
-        )
+    async def get_by_name(self, session: AsyncSession, name: str) -> RetrievalPlan | None:
+        result = await session.execute(select(RetrievalPlan).where(RetrievalPlan.name == name))
         return result.scalar_one_or_none()
 
-    async def get_by_id(
-        self, session: AsyncSession, plan_id: uuid.UUID
-    ) -> RetrievalPlan | None:
-        result = await session.execute(
-            select(RetrievalPlan).where(RetrievalPlan.id == plan_id)
-        )
+    async def get_by_id(self, session: AsyncSession, plan_id: uuid.UUID) -> RetrievalPlan | None:
+        result = await session.execute(select(RetrievalPlan).where(RetrievalPlan.id == plan_id))
         return result.scalar_one_or_none()
 
     async def list_plans(
@@ -50,9 +40,7 @@ class PlanRepository:
             q = q.where(RetrievalPlan.is_archived.is_(False))
         q = q.order_by(RetrievalPlan.created_at.desc())
 
-        total_result = await session.execute(
-            select(func.count()).select_from(q.subquery())
-        )
+        total_result = await session.execute(select(func.count()).select_from(q.subquery()))
         total = total_result.scalar_one()
 
         result = await session.execute(q.offset(offset).limit(limit))
@@ -61,16 +49,12 @@ class PlanRepository:
 
     async def archive(self, session: AsyncSession, plan_id: uuid.UUID) -> None:
         await session.execute(
-            update(RetrievalPlan)
-            .where(RetrievalPlan.id == plan_id)
-            .values(is_archived=True)
+            update(RetrievalPlan).where(RetrievalPlan.id == plan_id).values(is_archived=True)
         )
 
     # ── PlanVersion ────────────────────────────────────────────────────────────
 
-    async def create_version(
-        self, session: AsyncSession, version: PlanVersion
-    ) -> PlanVersion:
+    async def create_version(self, session: AsyncSession, version: PlanVersion) -> PlanVersion:
         session.add(version)
         await session.flush()
         await session.refresh(version)
@@ -98,9 +82,7 @@ class PlanRepository:
         )
         return result.scalar_one_or_none()
 
-    async def list_versions(
-        self, session: AsyncSession, plan_id: uuid.UUID
-    ) -> list[PlanVersion]:
+    async def list_versions(self, session: AsyncSession, plan_id: uuid.UUID) -> list[PlanVersion]:
         result = await session.execute(
             select(PlanVersion)
             .where(PlanVersion.plan_id == plan_id)
@@ -108,27 +90,19 @@ class PlanRepository:
         )
         return list(result.scalars().all())
 
-    async def unset_current_version(
-        self, session: AsyncSession, plan_id: uuid.UUID
-    ) -> None:
+    async def unset_current_version(self, session: AsyncSession, plan_id: uuid.UUID) -> None:
         """Marks all versions of this plan as not current."""
         await session.execute(
-            update(PlanVersion)
-            .where(PlanVersion.plan_id == plan_id)
-            .values(is_current=False)
+            update(PlanVersion).where(PlanVersion.plan_id == plan_id).values(is_current=False)
         )
 
-    async def get_next_version_number(
-        self, session: AsyncSession, plan: RetrievalPlan
-    ) -> int:
+    async def get_next_version_number(self, session: AsyncSession, plan: RetrievalPlan) -> int:
         """
         Locks the parent plan row with SELECT FOR UPDATE so concurrent version
         creates queue behind each other, guaranteeing monotonic version numbers.
         """
         await session.execute(
-            select(RetrievalPlan)
-            .where(RetrievalPlan.id == plan.id)
-            .with_for_update()
+            select(RetrievalPlan).where(RetrievalPlan.id == plan.id).with_for_update()
         )
         max_result = await session.execute(
             select(func.coalesce(func.max(PlanVersion.version), 0)).where(

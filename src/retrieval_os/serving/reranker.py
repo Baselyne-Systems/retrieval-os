@@ -99,8 +99,7 @@ def _get_cross_encoder(model_name: str) -> Any:
             from sentence_transformers import CrossEncoder  # type: ignore[import]
         except ImportError:
             raise EmbeddingProviderError(
-                "sentence_transformers is not installed. "
-                "Install with: uv sync --extra ml"
+                "sentence_transformers is not installed. Install with: uv sync --extra ml"
             )
         _ce_models[model_name] = CrossEncoder(model_name)
     return _ce_models[model_name]
@@ -128,8 +127,7 @@ async def _rerank_cross_encoder(
     raw_scores = await asyncio.to_thread(_score)
 
     reranked = [
-        IndexHit(id=h.id, score=float(s), payload=h.payload)
-        for h, s in zip(hits, raw_scores)
+        IndexHit(id=h.id, score=float(s), payload=h.payload) for h, s in zip(hits, raw_scores)
     ]
     reranked.sort(key=lambda x: x.score, reverse=True)
     return reranked[:top_k]

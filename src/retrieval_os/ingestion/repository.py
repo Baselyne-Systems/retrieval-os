@@ -11,17 +11,13 @@ from retrieval_os.ingestion.models import IngestionJob, IngestionJobStatus
 
 
 class IngestionRepository:
-    async def create(
-        self, session: AsyncSession, job: IngestionJob
-    ) -> IngestionJob:
+    async def create(self, session: AsyncSession, job: IngestionJob) -> IngestionJob:
         session.add(job)
         await session.flush()
         await session.refresh(job)
         return job
 
-    async def get(
-        self, session: AsyncSession, job_id: str
-    ) -> IngestionJob | None:
+    async def get(self, session: AsyncSession, job_id: str) -> IngestionJob | None:
         return await session.get(IngestionJob, job_id)
 
     async def list_for_plan(
@@ -48,9 +44,7 @@ class IngestionRepository:
         )
         return list(result.scalars().all()), total
 
-    async def claim_next_queued(
-        self, session: AsyncSession
-    ) -> IngestionJob | None:
+    async def claim_next_queued(self, session: AsyncSession) -> IngestionJob | None:
         """Claim the oldest QUEUED job using SELECT FOR UPDATE SKIP LOCKED.
 
         Marks the claimed job as RUNNING before returning so concurrent
@@ -93,9 +87,7 @@ class IngestionRepository:
         job.completed_at = datetime.now(UTC)
         await session.flush()
 
-    async def fail_job(
-        self, session: AsyncSession, job_id: str, *, error_message: str
-    ) -> None:
+    async def fail_job(self, session: AsyncSession, job_id: str, *, error_message: str) -> None:
         job = await self.get(session, job_id)
         if job is None:
             return

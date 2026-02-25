@@ -19,8 +19,8 @@ log = logging.getLogger(__name__)
 # ── Lazy singletons ────────────────────────────────────────────────────────────
 # Keyed by model identifier so different models can coexist if needed.
 
-_clip_state: dict[str, tuple[Any, Any]] = {}   # {model_name: (model, preprocess)}
-_whisper_state: dict[str, Any] = {}            # {model_size: WhisperModel}
+_clip_state: dict[str, tuple[Any, Any]] = {}  # {model_name: (model, preprocess)}
+_whisper_state: dict[str, Any] = {}  # {model_size: WhisperModel}
 
 
 def _get_clip(model_name: str) -> tuple[Any, Any]:
@@ -47,9 +47,7 @@ def _get_whisper(model_size: str) -> Any:
             raise EmbeddingProviderError(
                 "faster-whisper is not installed. Install with: uv sync --extra ml"
             )
-        _whisper_state[model_size] = WhisperModel(
-            model_size, device="cpu", compute_type="int8"
-        )
+        _whisper_state[model_size] = WhisperModel(model_size, device="cpu", compute_type="int8")
     return _whisper_state[model_size]
 
 
@@ -82,10 +80,7 @@ async def encode_images_clip(
         import torch  # type: ignore[import]
         from PIL import Image  # type: ignore[import]
 
-        tensors = [
-            preprocess(Image.open(io.BytesIO(b))).unsqueeze(0)
-            for b in image_bytes_list
-        ]
+        tensors = [preprocess(Image.open(io.BytesIO(b))).unsqueeze(0) for b in image_bytes_list]
         batch = torch.cat(tensors, dim=0)
         with torch.no_grad():
             features = clip_model.encode_image(batch)
@@ -118,9 +113,7 @@ async def transcribe_audio_whisper(
     def _transcribe() -> str:
         whisper_model = _get_whisper(model_size)
         buffer = io.BytesIO(audio_bytes)
-        segments, _ = whisper_model.transcribe(
-            buffer, beam_size=1, language=language
-        )
+        segments, _ = whisper_model.transcribe(buffer, beam_size=1, language=language)
         return " ".join(seg.text.strip() for seg in segments)
 
     return await asyncio.to_thread(_transcribe)

@@ -30,9 +30,7 @@ def _plan_redis_key(name: str) -> str:
     return f"ros:plan:{name}:current"
 
 
-async def _load_plan_config(
-    plan_name: str, db: AsyncSession
-) -> dict:
+async def _load_plan_config(plan_name: str, db: AsyncSession) -> dict:
     """Return plan config dict; check Redis first, fall back to Postgres."""
     redis = await get_redis()
     key = _plan_redis_key(plan_name)

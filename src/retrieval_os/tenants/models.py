@@ -16,9 +16,7 @@ class Tenant(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    max_requests_per_minute: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=60
-    )
+    max_requests_per_minute: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
     max_plans: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -42,10 +40,6 @@ class ApiKey(Base):
     key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    tenant: Mapped[Tenant] = relationship(
-        "Tenant", back_populates="api_keys", lazy="selectin"
-    )
+    tenant: Mapped[Tenant] = relationship("Tenant", back_populates="api_keys", lazy="selectin")

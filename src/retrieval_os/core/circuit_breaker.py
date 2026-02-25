@@ -64,7 +64,7 @@ class CircuitBreaker:
         self._half_open_success_threshold = half_open_success_threshold
 
         self._state: CircuitState = CircuitState.CLOSED
-        self._failure_times: list[float] = []   # monotonic timestamps
+        self._failure_times: list[float] = []  # monotonic timestamps
         self._opened_at: float | None = None
         self._half_open_successes: int = 0
         self._lock = asyncio.Lock()

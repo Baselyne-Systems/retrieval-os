@@ -81,9 +81,7 @@ async def aggregate_usage_costs(
         total_chars: int = row.total_chars or 0
 
         # Load plan version embedding config
-        provider, model = await _get_plan_embedding(
-            session, plan_name, plan_version
-        )
+        provider, model = await _get_plan_embedding(session, plan_name, plan_version)
         if provider is None:
             # Plan version no longer exists — skip
             continue

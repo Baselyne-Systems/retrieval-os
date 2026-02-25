@@ -240,9 +240,9 @@ class TestGenerateRecommendations:
         plan = _make_plan(
             cache_enabled=True,
             total_queries=1000,
-            cache_hits=100,   # low hit rate
+            cache_hits=100,  # low hit rate
             estimated_cost_usd=2.0,  # high cost
-            top_k=30,          # high top_k
+            top_k=30,  # high top_k
         )
         recs = generate_recommendations([plan])
         categories = {r.category for r in recs}
@@ -253,7 +253,7 @@ class TestGenerateRecommendations:
     def test_sorted_high_before_low(self) -> None:
         plan = _make_plan(
             cache_enabled=False,  # high
-            top_k=25,             # low
+            top_k=25,  # low
         )
         recs = generate_recommendations([plan])
         priorities = [r.priority for r in recs]

@@ -162,9 +162,7 @@ async def create_version(
     return PlanVersionResponse.model_validate(version)
 
 
-async def list_versions(
-    session: AsyncSession, plan_name: str
-) -> list[PlanVersionResponse]:
+async def list_versions(session: AsyncSession, plan_name: str) -> list[PlanVersionResponse]:
     plan = await plan_repo.get_by_name(session, plan_name)
     if not plan:
         raise PlanNotFoundError(f"Plan '{plan_name}' not found")
@@ -181,9 +179,8 @@ async def get_version(
     version = await plan_repo.get_version(session, plan.id, version_num)
     if not version:
         from retrieval_os.core.exceptions import PlanVersionNotFoundError
-        raise PlanVersionNotFoundError(
-            f"Version {version_num} of plan '{plan_name}' not found"
-        )
+
+        raise PlanVersionNotFoundError(f"Version {version_num} of plan '{plan_name}' not found")
     return PlanVersionResponse.model_validate(version)
 
 

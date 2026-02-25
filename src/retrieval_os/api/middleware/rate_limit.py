@@ -70,9 +70,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             # Auth disabled or route exempt → no tenant context → skip.
             return await call_next(request)  # type: ignore[operator]
 
-        max_rpm: int = getattr(
-            request.state, "max_rpm", settings.rate_limit_default_rpm
-        )
+        max_rpm: int = getattr(request.state, "max_rpm", settings.rate_limit_default_rpm)
 
         try:
             allowed = await check_rate_limit(tenant_id, max_rpm)
@@ -90,9 +88,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 status_code=429,
                 content={
                     "error": "RATE_LIMIT_EXCEEDED",
-                    "message": (
-                        f"Rate limit exceeded. Maximum {max_rpm} requests per minute."
-                    ),
+                    "message": (f"Rate limit exceeded. Maximum {max_rpm} requests per minute."),
                 },
             )
 

@@ -143,7 +143,10 @@ async def execute_retrieval(
     # 6. Cache set ─────────────────────────────────────────────────────────────
     if cache_enabled:
         await cache_set(
-            plan_name, version, query, top_k,
+            plan_name,
+            version,
+            query,
+            top_k,
             [c.to_dict() for c in chunks],
             ttl_seconds=cache_ttl_seconds,
         )
@@ -156,5 +159,3 @@ def _record_latency(plan_name: str, start: float) -> None:
     elapsed = time.perf_counter() - start
     metrics.retrieval_latency_seconds.labels(plan_name=plan_name).observe(elapsed)
     metrics.retrieval_requests_total.labels(plan_name=plan_name).inc()
-
-

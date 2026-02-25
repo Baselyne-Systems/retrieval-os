@@ -9,24 +9,17 @@ from retrieval_os.deployments.models import Deployment, DeploymentStatus
 
 
 class DeploymentRepository:
-
     async def create(self, session: AsyncSession, deployment: Deployment) -> Deployment:
         session.add(deployment)
         await session.flush()
         await session.refresh(deployment)
         return deployment
 
-    async def get_by_id(
-        self, session: AsyncSession, deployment_id: str
-    ) -> Deployment | None:
-        result = await session.execute(
-            select(Deployment).where(Deployment.id == deployment_id)
-        )
+    async def get_by_id(self, session: AsyncSession, deployment_id: str) -> Deployment | None:
+        result = await session.execute(select(Deployment).where(Deployment.id == deployment_id))
         return result.scalar_one_or_none()
 
-    async def get_active_for_plan(
-        self, session: AsyncSession, plan_name: str
-    ) -> Deployment | None:
+    async def get_active_for_plan(self, session: AsyncSession, plan_name: str) -> Deployment | None:
         """Return the ACTIVE or ROLLING_OUT deployment for a plan, if any."""
         result = await session.execute(
             select(Deployment).where(
@@ -58,18 +51,26 @@ class DeploymentRepository:
     ) -> None:
         values = {"status": status, **extra_fields}
         await session.execute(
-            update(Deployment)
-            .where(Deployment.id == deployment_id)
-            .values(**values)
+            update(Deployment).where(Deployment.id == deployment_id).values(**values)
         )
 
-    async def list_rolling_out(
-        self, session: AsyncSession
-    ) -> list[Deployment]:
+    async def list_rolling_out(self, session: AsyncSession) -> list[Deployment]:
         """Return all deployments in ROLLING_OUT status (for the rollout stepper)."""
         result = await session.execute(
+            select(Deployment).where(Deployment.status == DeploymentStatus.ROLLING_OUT.value)
+        )
+        return list(result.scalars().all())
+
+    async def list_live(self, session: AsyncSession) -> list[Deployment]:
+        """Return all ACTIVE and ROLLING_OUT deployments across every plan.
+
+        Used by the rollback watchdog to check guard rails.
+        """
+        result = await session.execute(
             select(Deployment).where(
-                Deployment.status == DeploymentStatus.ROLLING_OUT.value
+                Deployment.status.in_(
+                    [DeploymentStatus.ACTIVE.value, DeploymentStatus.ROLLING_OUT.value]
+                )
             )
         )
         return list(result.scalars().all())

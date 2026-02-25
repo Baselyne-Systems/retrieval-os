@@ -20,7 +20,7 @@ from retrieval_os.serving.schemas import ChunkResponse, QueryResponse
 
 router = APIRouter(prefix="/v1/query", tags=["multimodal"])
 
-_MAX_IMAGE_BYTES = 20 * 1024 * 1024   # 20 MB
+_MAX_IMAGE_BYTES = 20 * 1024 * 1024  # 20 MB
 _MAX_AUDIO_BYTES = 100 * 1024 * 1024  # 100 MB
 
 

@@ -46,9 +46,7 @@ async def list_eval_jobs(
     db: AsyncSession = Depends(get_db),
 ) -> EvalJobListResponse:
     """List eval jobs, newest first. Optionally filter by plan name."""
-    return await service.list_eval_jobs(
-        db, plan_name=plan_name, limit=limit, offset=offset
-    )
+    return await service.list_eval_jobs(db, plan_name=plan_name, limit=limit, offset=offset)
 
 
 @router.get(
@@ -62,6 +60,4 @@ async def list_plan_eval_jobs(
     db: AsyncSession = Depends(get_db),
 ) -> EvalJobListResponse:
     """List eval jobs for a specific plan, newest first."""
-    return await service.list_eval_jobs(
-        db, plan_name=plan_name, limit=limit, offset=offset
-    )
+    return await service.list_eval_jobs(db, plan_name=plan_name, limit=limit, offset=offset)

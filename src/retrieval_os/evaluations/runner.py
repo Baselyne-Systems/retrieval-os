@@ -50,9 +50,7 @@ class EvalResults:
     failed_queries: int
     error_message: str | None = None
     # per-query retrieved IDs (for debugging, not stored in DB)
-    query_results: list[tuple[list[str], set[str]]] = field(
-        default_factory=list, repr=False
-    )
+    query_results: list[tuple[list[str], set[str]]] = field(default_factory=list, repr=False)
 
 
 # ── Dataset loading ────────────────────────────────────────────────────────────
@@ -87,9 +85,7 @@ def _parse_jsonl(raw: bytes) -> list[EvalRecord]:
 
         relevant_scores_raw: dict[str, float] = obj.get("relevant_scores", {})
         # Default to binary relevance (1.0) for any id not in relevant_scores
-        relevance_scores = {
-            rid: relevant_scores_raw.get(rid, 1.0) for rid in relevant_ids
-        }
+        relevance_scores = {rid: relevant_scores_raw.get(rid, 1.0) for rid in relevant_ids}
         records.append(
             EvalRecord(
                 query=query,
@@ -194,8 +190,7 @@ async def execute_eval_job(
     # Aggregate Recall@k for each k
     def _mean_recall(k: int) -> float:
         vals = [
-            compute_recall_at_k(retrieved, relevant, k)
-            for retrieved, relevant in per_query_results
+            compute_recall_at_k(retrieved, relevant, k) for retrieved, relevant in per_query_results
         ]
         return sum(vals) / len(vals)
 

@@ -17,9 +17,7 @@ class WebhookRepository:
         await session.refresh(subscription)
         return subscription
 
-    async def get(
-        self, session: AsyncSession, subscription_id: str
-    ) -> WebhookSubscription | None:
+    async def get(self, session: AsyncSession, subscription_id: str) -> WebhookSubscription | None:
         return await session.get(WebhookSubscription, subscription_id)
 
     async def list_all(
@@ -29,9 +27,7 @@ class WebhookRepository:
         offset: int = 0,
         limit: int = 50,
     ) -> tuple[list[WebhookSubscription], int]:
-        count_result = await session.execute(
-            select(func.count()).select_from(WebhookSubscription)
-        )
+        count_result = await session.execute(select(func.count()).select_from(WebhookSubscription))
         total: int = count_result.scalar_one()
 
         result = await session.execute(
@@ -57,15 +53,9 @@ class WebhookRepository:
             select(WebhookSubscription).where(WebhookSubscription.is_active.is_(True))
         )
         all_active = list(result.scalars().all())
-        return [
-            sub
-            for sub in all_active
-            if not sub.events or event_type in sub.events
-        ]
+        return [sub for sub in all_active if not sub.events or event_type in sub.events]
 
-    async def delete(
-        self, session: AsyncSession, subscription_id: str
-    ) -> bool:
+    async def delete(self, session: AsyncSession, subscription_id: str) -> bool:
         sub = await self.get(session, subscription_id)
         if sub is None:
             return False

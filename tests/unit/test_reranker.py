@@ -86,9 +86,7 @@ class TestRerankCrossEncoder:
             "retrieval_os.serving.reranker._get_cross_encoder",
             return_value=fake_ce,
         ):
-            result = await rerank(
-                hits, query="query", reranker="cross_encoder:test-model", top_k=3
-            )
+            result = await rerank(hits, query="query", reranker="cross_encoder:test-model", top_k=3)
 
         assert result[0].id == "c"
         assert result[1].id == "b"
@@ -104,9 +102,7 @@ class TestRerankCrossEncoder:
             "retrieval_os.serving.reranker._get_cross_encoder",
             return_value=fake_ce,
         ):
-            result = await rerank(
-                hits, query="q", reranker="cross_encoder:test-model", top_k=2
-            )
+            result = await rerank(hits, query="q", reranker="cross_encoder:test-model", top_k=2)
 
         assert len(result) == 2
 
@@ -124,9 +120,7 @@ class TestRerankCrossEncoder:
             "retrieval_os.serving.reranker._get_cross_encoder",
             return_value=fake_ce,
         ):
-            result = await rerank(
-                hits, query="q", reranker="cross_encoder:test-model", top_k=1
-            )
+            result = await rerank(hits, query="q", reranker="cross_encoder:test-model", top_k=1)
 
         assert isinstance(result[0].score, float)
         assert abs(result[0].score - 0.42) < 1e-6
@@ -142,9 +136,7 @@ class TestRerankCrossEncoder:
             side_effect=EmbeddingProviderError("not installed"),
         ):
             with pytest.raises(EmbeddingProviderError):
-                await rerank(
-                    hits, query="q", reranker="cross_encoder:test-model", top_k=1
-                )
+                await rerank(hits, query="q", reranker="cross_encoder:test-model", top_k=1)
 
     @pytest.mark.asyncio
     async def test_runtime_error_triggers_graceful_degradation(self) -> None:
@@ -159,9 +151,7 @@ class TestRerankCrossEncoder:
             "retrieval_os.serving.reranker._get_cross_encoder",
             return_value=fake_ce,
         ):
-            result = await rerank(
-                hits, query="q", reranker="cross_encoder:test-model", top_k=2
-            )
+            result = await rerank(hits, query="q", reranker="cross_encoder:test-model", top_k=2)
 
         # Graceful degradation: returns original hits
         assert len(result) == 2

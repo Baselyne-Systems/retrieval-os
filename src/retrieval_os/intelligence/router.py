@@ -48,9 +48,7 @@ async def get_cost_summary(
     db: AsyncSession = Depends(get_db),
 ) -> CostSummaryResponse:
     """Return aggregated cost summary per plan for the requested time window."""
-    return await service.get_cost_summary(
-        db, since=since, until=until, plan_name=plan_name
-    )
+    return await service.get_cost_summary(db, since=since, until=until, plan_name=plan_name)
 
 
 @router.get("/cost/entries", response_model=dict)

@@ -32,6 +32,7 @@ def get_s3_client() -> Any:
 
 async def check_s3_connection() -> bool:
     """Returns True if the bucket is reachable."""
+
     def _check() -> bool:
         try:
             _make_client().head_bucket(Bucket=settings.s3_bucket_name)
@@ -44,6 +45,7 @@ async def check_s3_connection() -> bool:
 
 async def ensure_bucket_exists() -> None:
     """Creates the default bucket if it does not exist."""
+
     def _ensure() -> None:
         client = _make_client()
         try:

@@ -62,8 +62,8 @@ class CostSummaryResponse(BaseModel):
 
 class Recommendation(BaseModel):
     plan_name: str
-    category: str           # "cache", "model", "top_k"
-    priority: str           # "high", "medium", "low"
+    category: str  # "cache", "model", "top_k"
+    priority: str  # "high", "medium", "low"
     message: str
     potential_savings_pct: float | None = None
 

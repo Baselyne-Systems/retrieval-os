@@ -13,7 +13,9 @@ class IngestDocumentRequest(BaseModel):
 
     id: str = Field(..., min_length=1, description="Stable document identifier.")
     content: str = Field(..., min_length=1, description="Raw text content.")
-    metadata: dict = Field(default_factory=dict, description="Arbitrary key-value payload stored with each chunk.")
+    metadata: dict = Field(
+        default_factory=dict, description="Arbitrary key-value payload stored with each chunk."
+    )
 
 
 class IngestRequest(BaseModel):
@@ -28,7 +30,7 @@ class IngestRequest(BaseModel):
         default=None,
         description=(
             "S3 URI of a JSONL file where each line is "
-            "{\"id\": str, \"content\": str, \"metadata\": {}}. "
+            '{"id": str, "content": str, "metadata": {}}. '
             "Mutually exclusive with documents."
         ),
     )

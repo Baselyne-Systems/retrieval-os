@@ -55,15 +55,13 @@ def validate_plan_config(config: dict[str, Any]) -> None:
     # Index backend
     if backend not in VALID_BACKENDS:
         errors.append(
-            f"index_backend '{backend}' is not registered; "
-            f"valid values: {sorted(VALID_BACKENDS)}"
+            f"index_backend '{backend}' is not registered; valid values: {sorted(VALID_BACKENDS)}"
         )
 
     # Distance metric
     if metric not in VALID_METRICS:
         errors.append(
-            f"distance_metric '{metric}' is not valid; "
-            f"valid values: {sorted(VALID_METRICS)}"
+            f"distance_metric '{metric}' is not valid; valid values: {sorted(VALID_METRICS)}"
         )
 
     # Modalities
@@ -91,9 +89,7 @@ def validate_plan_config(config: dict[str, Any]) -> None:
         if rerank_top_k < 1:
             errors.append("rerank_top_k must be >= 1")
         elif rerank_top_k > top_k:
-            errors.append(
-                f"rerank_top_k ({rerank_top_k}) must be <= top_k ({top_k})"
-            )
+            errors.append(f"rerank_top_k ({rerank_top_k}) must be <= top_k ({top_k})")
 
     # hybrid_alpha
     if hybrid_alpha is not None and not (0.0 <= hybrid_alpha <= 1.0):

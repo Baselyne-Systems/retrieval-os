@@ -267,29 +267,35 @@ class TestParseJsonl:
         return "\n".join(json.dumps(r) for r in records).encode()
 
     def test_basic_parsing(self) -> None:
-        raw = self._jsonl([
-            {"query": "what is X?", "relevant_ids": ["id1", "id2"]},
-        ])
+        raw = self._jsonl(
+            [
+                {"query": "what is X?", "relevant_ids": ["id1", "id2"]},
+            ]
+        )
         records = _parse_jsonl(raw)
         assert len(records) == 1
         assert records[0].query == "what is X?"
         assert records[0].relevant_ids == {"id1", "id2"}
 
     def test_default_relevance_scores(self) -> None:
-        raw = self._jsonl([
-            {"query": "q", "relevant_ids": ["a", "b"]},
-        ])
+        raw = self._jsonl(
+            [
+                {"query": "q", "relevant_ids": ["a", "b"]},
+            ]
+        )
         records = _parse_jsonl(raw)
         assert records[0].relevance_scores == {"a": 1.0, "b": 1.0}
 
     def test_custom_relevance_scores(self) -> None:
-        raw = self._jsonl([
-            {
-                "query": "q",
-                "relevant_ids": ["a", "b"],
-                "relevant_scores": {"a": 1.0, "b": 0.5},
-            }
-        ])
+        raw = self._jsonl(
+            [
+                {
+                    "query": "q",
+                    "relevant_ids": ["a", "b"],
+                    "relevant_scores": {"a": 1.0, "b": 0.5},
+                }
+            ]
+        )
         records = _parse_jsonl(raw)
         assert records[0].relevance_scores == {"a": 1.0, "b": 0.5}
 
@@ -300,19 +306,23 @@ class TestParseJsonl:
         assert len(records) == 1
 
     def test_skips_missing_query(self) -> None:
-        raw = self._jsonl([
-            {"relevant_ids": ["id1"]},
-            {"query": "good q", "relevant_ids": ["id2"]},
-        ])
+        raw = self._jsonl(
+            [
+                {"relevant_ids": ["id1"]},
+                {"query": "good q", "relevant_ids": ["id2"]},
+            ]
+        )
         records = _parse_jsonl(raw)
         assert len(records) == 1
         assert records[0].query == "good q"
 
     def test_skips_missing_relevant_ids(self) -> None:
-        raw = self._jsonl([
-            {"query": "bad q", "relevant_ids": []},
-            {"query": "good q", "relevant_ids": ["id1"]},
-        ])
+        raw = self._jsonl(
+            [
+                {"query": "bad q", "relevant_ids": []},
+                {"query": "good q", "relevant_ids": ["id1"]},
+            ]
+        )
         records = _parse_jsonl(raw)
         assert len(records) == 1
 
@@ -322,10 +332,7 @@ class TestParseJsonl:
         assert len(records) == 1
 
     def test_multiple_records(self) -> None:
-        raw = self._jsonl([
-            {"query": f"q{i}", "relevant_ids": [f"id{i}"]}
-            for i in range(5)
-        ])
+        raw = self._jsonl([{"query": f"q{i}", "relevant_ids": [f"id{i}"]} for i in range(5)])
         records = _parse_jsonl(raw)
         assert len(records) == 5
 

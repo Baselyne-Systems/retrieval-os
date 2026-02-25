@@ -80,4 +80,4 @@ def estimate_chunk_count(
     if word_count <= chunk_size:
         return 1
     step = chunk_size - overlap
-    return max(1, -(-( word_count - chunk_size) // step) + 1)
+    return max(1, -(-(word_count - chunk_size) // step) + 1)

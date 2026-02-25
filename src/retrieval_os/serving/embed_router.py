@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 
 # ── Provider registry ────────────────────────────────────────────────────────
 
-_st_model: Any = None   # sentence_transformers SentenceTransformer
+_st_model: Any = None  # sentence_transformers SentenceTransformer
 _oa_client: Any = None  # openai AsyncOpenAI
 
 
@@ -34,8 +34,7 @@ def _get_st_model(model_name: str) -> Any:
             _st_model = SentenceTransformer(model_name)
         except ImportError:
             raise EmbeddingProviderError(
-                "sentence_transformers is not installed. "
-                "Install with: uv sync --extra ml"
+                "sentence_transformers is not installed. Install with: uv sync --extra ml"
             )
     return _st_model
 
@@ -46,9 +45,7 @@ def _get_oa_client() -> Any:
         try:
             import openai  # type: ignore[import]
 
-            _oa_client = openai.AsyncOpenAI(
-                api_key=getattr(settings, "openai_api_key", None)
-            )
+            _oa_client = openai.AsyncOpenAI(api_key=getattr(settings, "openai_api_key", None))
         except ImportError:
             raise EmbeddingProviderError(
                 "openai package is not installed. Install with: pip install openai"
@@ -84,16 +81,17 @@ async def embed_text(
     try:
         vectors = await breaker.call(
             _dispatch_text,
-            texts, provider=provider, model=model,
-            normalize=normalize, batch_size=batch_size,
+            texts,
+            provider=provider,
+            model=model,
+            normalize=normalize,
+            batch_size=batch_size,
         )
     except EmbeddingProviderError:
         raise
     except Exception as exc:
         metrics.embed_errors_total.labels(provider=provider).inc()
-        raise EmbeddingProviderError(
-            f"Embedding failed ({provider}/{model}): {exc}"
-        ) from exc
+        raise EmbeddingProviderError(f"Embedding failed ({provider}/{model}): {exc}") from exc
 
     elapsed = time.perf_counter() - start
     metrics.embed_latency_seconds.labels(provider=provider).observe(elapsed)
@@ -194,9 +192,7 @@ async def embed_images(
         raise
     except Exception as exc:
         metrics.embed_errors_total.labels(provider=provider).inc()
-        raise EmbeddingProviderError(
-            f"Image embedding failed ({provider}/{model}): {exc}"
-        ) from exc
+        raise EmbeddingProviderError(f"Image embedding failed ({provider}/{model}): {exc}") from exc
 
     elapsed = time.perf_counter() - start
     metrics.embed_latency_seconds.labels(provider=provider).observe(elapsed)
@@ -249,9 +245,7 @@ async def embed_audio(
     try:
         transcripts: list[str] = []
         for audio_bytes in audio_bytes_list:
-            transcript = await transcribe_audio_whisper(
-                audio_bytes, model_size=whisper_model_size
-            )
+            transcript = await transcribe_audio_whisper(audio_bytes, model_size=whisper_model_size)
             transcripts.append(transcript)
         vectors = await breaker.call(
             embed_text,

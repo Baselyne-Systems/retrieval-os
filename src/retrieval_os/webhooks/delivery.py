@@ -33,8 +33,8 @@ from retrieval_os.webhooks.repository import webhook_repo
 
 log = logging.getLogger(__name__)
 
-_CONNECT_TIMEOUT = 5.0   # seconds
-_READ_TIMEOUT = 10.0     # seconds
+_CONNECT_TIMEOUT = 5.0  # seconds
+_READ_TIMEOUT = 10.0  # seconds
 _MAX_ATTEMPTS = 3
 
 
@@ -109,9 +109,7 @@ async def fire_webhook_event(
     The *session* must still be open when this is called so we can load
     subscriptions.  Each delivery task then runs independently of the session.
     """
-    subscriptions = await webhook_repo.get_subscriptions_for_event(
-        session, str(event_type)
-    )
+    subscriptions = await webhook_repo.get_subscriptions_for_event(session, str(event_type))
     if not subscriptions:
         return
 

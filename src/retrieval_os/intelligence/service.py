@@ -93,9 +93,7 @@ async def get_cost_summary(
     if until is None:
         until = datetime.now(UTC)
 
-    rows = await intel_repo.get_summary(
-        session, since=since, until=until, plan_name=plan_name
-    )
+    rows = await intel_repo.get_summary(session, since=since, until=until, plan_name=plan_name)
 
     summary_rows: list[CostSummaryRow] = []
     grand_total = 0.0
@@ -118,9 +116,7 @@ async def get_cost_summary(
 
     # Update Prometheus cache efficiency gauges
     for row in summary_rows:
-        metrics.cache_efficiency_ratio.labels(plan_name=row.plan_name).set(
-            row.cache_hit_rate
-        )
+        metrics.cache_efficiency_ratio.labels(plan_name=row.plan_name).set(row.cache_hit_rate)
 
     return CostSummaryResponse(
         since=since, until=until, rows=summary_rows, grand_total_usd=grand_total
@@ -180,9 +176,7 @@ async def get_recommendations(
     recs = generate_recommendations(plan_stats)
 
     # Update Prometheus gauge
-    metrics.recommendations_active.labels(
-        category="all", priority="all"
-    ).set(len(recs))
+    metrics.recommendations_active.labels(category="all", priority="all").set(len(recs))
 
     return RecommendationsResponse(
         total=len(recs),

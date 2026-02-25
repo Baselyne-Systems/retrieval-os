@@ -12,7 +12,6 @@ from retrieval_os.lineage.models import LineageArtifact, LineageEdge
 
 
 class LineageRepository:
-
     async def create_artifact(
         self, session: AsyncSession, artifact: LineageArtifact
     ) -> LineageArtifact:
@@ -21,9 +20,7 @@ class LineageRepository:
         await session.refresh(artifact)
         return artifact
 
-    async def get_artifact(
-        self, session: AsyncSession, artifact_id: str
-    ) -> LineageArtifact | None:
+    async def get_artifact(self, session: AsyncSession, artifact_id: str) -> LineageArtifact | None:
         result = await session.execute(
             select(LineageArtifact).where(LineageArtifact.id == artifact_id)
         )
@@ -33,9 +30,7 @@ class LineageRepository:
         self, session: AsyncSession, storage_uri: str
     ) -> LineageArtifact | None:
         result = await session.execute(
-            select(LineageArtifact).where(
-                LineageArtifact.storage_uri == storage_uri
-            )
+            select(LineageArtifact).where(LineageArtifact.storage_uri == storage_uri)
         )
         return result.scalar_one_or_none()
 
@@ -57,19 +52,13 @@ class LineageRepository:
         results = await session.execute(q.offset(offset).limit(limit))
         return list(results.scalars().all()), total
 
-    async def create_edge(
-        self, session: AsyncSession, edge: LineageEdge
-    ) -> LineageEdge:
+    async def create_edge(self, session: AsyncSession, edge: LineageEdge) -> LineageEdge:
         session.add(edge)
         await session.flush()
         return edge
 
-    async def get_edge(
-        self, session: AsyncSession, edge_id: str
-    ) -> LineageEdge | None:
-        result = await session.execute(
-            select(LineageEdge).where(LineageEdge.id == edge_id)
-        )
+    async def get_edge(self, session: AsyncSession, edge_id: str) -> LineageEdge | None:
+        result = await session.execute(select(LineageEdge).where(LineageEdge.id == edge_id))
         return result.scalar_one_or_none()
 
     async def edge_exists(
@@ -155,9 +144,7 @@ class LineageRepository:
         )
         return [{"artifact_id": row.artifact_id, "depth": row.depth} for row in result]
 
-    async def get_orphaned_artifacts(
-        self, session: AsyncSession
-    ) -> list[LineageArtifact]:
+    async def get_orphaned_artifacts(self, session: AsyncSession) -> list[LineageArtifact]:
         """Return artifacts that are not reachable from any active deployment.
 
         An artifact is an orphan if it has no child edges (i.e. it is a leaf
@@ -169,11 +156,7 @@ class LineageRepository:
         implementation will cross-reference deployments in Phase 6.
         """
         # Subquery: IDs of artifacts that are parents of something
-        has_children = (
-            select(LineageEdge.parent_artifact_id)
-            .distinct()
-            .scalar_subquery()
-        )
+        has_children = select(LineageEdge.parent_artifact_id).distinct().scalar_subquery()
         result = await session.execute(
             select(LineageArtifact)
             .where(LineageArtifact.id.not_in(has_children))
@@ -187,9 +170,7 @@ class LineageRepository:
         if not artifact_ids:
             return []
         result = await session.execute(
-            select(LineageArtifact).where(
-                LineageArtifact.id.in_(artifact_ids)
-            )
+            select(LineageArtifact).where(LineageArtifact.id.in_(artifact_ids))
         )
         return list(result.scalars().all())
 

@@ -13,7 +13,6 @@ from retrieval_os.intelligence.models import CostEntry, ModelPricing
 
 
 class IntelligenceRepository:
-
     # ── ModelPricing ───────────────────────────────────────────────────────────
 
     async def get_pricing(
@@ -44,9 +43,7 @@ class IntelligenceRepository:
         )
         return list(result.scalars().all())
 
-    async def add_pricing(
-        self, session: AsyncSession, entry: ModelPricing
-    ) -> ModelPricing:
+    async def add_pricing(self, session: AsyncSession, entry: ModelPricing) -> ModelPricing:
         """Add a new pricing entry (expires any previous one for same provider/model)."""
         from datetime import UTC
 

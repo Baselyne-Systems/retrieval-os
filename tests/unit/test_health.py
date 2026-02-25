@@ -9,9 +9,7 @@ from httpx import AsyncClient
 @pytest.fixture
 def mock_deps(monkeypatch: pytest.MonkeyPatch) -> None:
     """Patch DB and Redis checks so tests don't need live infrastructure."""
-    monkeypatch.setattr(
-        "retrieval_os.api.health.check_db_connection", AsyncMock(return_value=True)
-    )
+    monkeypatch.setattr("retrieval_os.api.health.check_db_connection", AsyncMock(return_value=True))
     monkeypatch.setattr(
         "retrieval_os.api.health.check_redis_connection", AsyncMock(return_value=True)
     )

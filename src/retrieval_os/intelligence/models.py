@@ -25,9 +25,7 @@ class ModelPricing(Base):
     """
 
     __tablename__ = "model_pricing"
-    __table_args__ = (
-        UniqueConstraint("provider", "model", "valid_from", name="uq_model_pricing"),
-    )
+    __table_args__ = (UniqueConstraint("provider", "model", "valid_from", name="uq_model_pricing"),)
 
     id: Mapped[str] = mapped_column(
         PG_UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid7())
@@ -53,7 +51,11 @@ class CostEntry(Base):
     __tablename__ = "cost_entries"
     __table_args__ = (
         UniqueConstraint(
-            "plan_name", "plan_version", "window_start", "provider", "model",
+            "plan_name",
+            "plan_version",
+            "window_start",
+            "provider",
+            "model",
             name="uq_cost_entry_window",
         ),
     )

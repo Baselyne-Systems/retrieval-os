@@ -44,37 +44,23 @@ class Deployment(Base):
     )
 
     # Traffic control
-    traffic_weight: Mapped[float] = mapped_column(
-        Float, nullable=False, server_default="0.0"
-    )
+    traffic_weight: Mapped[float] = mapped_column(Float, nullable=False, server_default="0.0")
     # Gradual rollout: percent to increment each step (None = instant full deploy)
     rollout_step_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
     # How often to advance (seconds between steps)
-    rollout_step_interval_seconds: Mapped[int | None] = mapped_column(
-        Integer, nullable=True
-    )
+    rollout_step_interval_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Rollback thresholds (optional — watchdog only triggers when set)
-    rollback_recall_threshold: Mapped[float | None] = mapped_column(
-        Float, nullable=True
-    )
-    rollback_error_rate_threshold: Mapped[float | None] = mapped_column(
-        Float, nullable=True
-    )
+    rollback_recall_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rollback_error_rate_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # Governance
-    change_note: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=""
-    )
+    change_note: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    activated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    rolled_back_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rolled_back_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rollback_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     @property

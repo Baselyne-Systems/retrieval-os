@@ -10,7 +10,6 @@ from retrieval_os.evaluations.models import EvalJob, EvalJobStatus
 
 
 class EvaluationRepository:
-
     async def create_job(self, session: AsyncSession, job: EvalJob) -> EvalJob:
         session.add(job)
         await session.flush()
@@ -18,9 +17,7 @@ class EvaluationRepository:
         return job
 
     async def get_job(self, session: AsyncSession, job_id: str) -> EvalJob | None:
-        result = await session.execute(
-            select(EvalJob).where(EvalJob.id == job_id)
-        )
+        result = await session.execute(select(EvalJob).where(EvalJob.id == job_id))
         return result.scalar_one_or_none()
 
     async def list_jobs(
