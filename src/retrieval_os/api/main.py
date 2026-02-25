@@ -18,6 +18,8 @@ from retrieval_os.api.background import (
     rollout_stepper,
 )
 from retrieval_os.api.health import router as health_router
+from retrieval_os.api.middleware.auth import AuthMiddleware
+from retrieval_os.api.middleware.rate_limit import RateLimitMiddleware
 from retrieval_os.api.middleware.request_id import RequestIDMiddleware
 from retrieval_os.api.middleware.telemetry import TelemetryMiddleware
 from retrieval_os.core.config import settings
@@ -131,6 +133,9 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(TelemetryMiddleware)
     app.add_middleware(RequestIDMiddleware)
+    # Auth runs outermost (last added), then RateLimit uses the tenant_id it attaches.
+    app.add_middleware(RateLimitMiddleware)
+    app.add_middleware(AuthMiddleware)
 
     # ── Exception handlers ─────────────────────────────────────────────────────
     @app.exception_handler(RetrievalOSError)
@@ -154,6 +159,7 @@ def create_app() -> FastAPI:
     from retrieval_os.intelligence.router import router as intelligence_router
     from retrieval_os.lineage.router import router as lineage_router
     from retrieval_os.plans.router import router as plans_router
+    from retrieval_os.tenants.router import router as tenants_router
 
     app.include_router(health_router)
     app.include_router(plans_router)
@@ -163,6 +169,7 @@ def create_app() -> FastAPI:
     app.include_router(lineage_router)
     app.include_router(eval_router)
     app.include_router(intelligence_router)
+    app.include_router(tenants_router)
 
     # ── OTel auto-instrumentation ──────────────────────────────────────────────
     FastAPIInstrumentor.instrument_app(app)

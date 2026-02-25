@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     otel_enabled: bool = True
     otel_service_name: str = "retrieval-os-api"
 
+    # ── Auth & Rate limiting ───────────────────────────────────────────────────
+    auth_enabled: bool = False          # Enable API key authentication
+    api_key_header: str = "X-API-Key"   # Header name for the API key
+    rate_limit_enabled: bool = False    # Enable per-tenant rate limiting
+    rate_limit_default_rpm: int = 60    # Default max requests/minute per tenant
+
     # ── Background task intervals ─────────────────────────────────────────────
     rollback_watchdog_interval_seconds: int = 30
     rollout_stepper_interval_seconds: int = 10

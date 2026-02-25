@@ -93,3 +93,17 @@ class EmbeddingProviderError(UpstreamError):
 
 class CircuitOpenError(UpstreamError):
     error_code = "CIRCUIT_BREAKER_OPEN"
+
+
+# ── 401 Authentication ─────────────────────────────────────────────────────────
+
+class AuthenticationError(RetrievalOSError):
+    status_code = 401
+    error_code = "AUTHENTICATION_REQUIRED"
+
+
+# ── 429 Rate Limit ────────────────────────────────────────────────────────────
+
+class RateLimitError(RetrievalOSError):
+    status_code = 429
+    error_code = "RATE_LIMIT_EXCEEDED"
