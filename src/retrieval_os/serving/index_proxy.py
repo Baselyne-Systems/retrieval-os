@@ -102,6 +102,55 @@ async def vector_search(
     raise IndexBackendError(f"Unknown index backend: '{backend}'")
 
 
+async def upsert_vectors(
+    *,
+    backend: str,
+    collection: str,
+    points: list[dict],
+) -> int:
+    """Upsert dense vectors into the specified index backend.
+
+    Args:
+        backend:    "qdrant" (pgvector planned).
+        collection: Collection name.
+        points:     List of ``{"id": str, "vector": list[float], "payload": dict}``
+                    dicts to upsert.
+
+    Returns:
+        Number of points upserted.
+    """
+    if backend == "qdrant":
+        return await _qdrant_upsert(collection=collection, points=points)
+    if backend == "pgvector":
+        raise IndexBackendError("pgvector backend is not yet implemented.")
+    raise IndexBackendError(f"Unknown index backend: '{backend}'")
+
+
+async def _qdrant_upsert(*, collection: str, points: list[dict]) -> int:
+    from qdrant_client.http.models import PointStruct  # type: ignore[import]
+
+    client = _get_qdrant()
+    try:
+        qdrant_points = [
+            PointStruct(
+                id=p["id"],
+                vector=p["vector"],
+                payload=p.get("payload", {}),
+            )
+            for p in points
+        ]
+        await client.upsert(
+            collection_name=collection,
+            points=qdrant_points,
+            wait=True,
+        )
+    except Exception as exc:
+        raise IndexBackendError(
+            f"Qdrant upsert failed on collection '{collection}': {exc}"
+        ) from exc
+    return len(points)
+
+
 async def _qdrant_search(
     *,
     collection: str,

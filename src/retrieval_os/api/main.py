@@ -14,6 +14,7 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from retrieval_os.api.background import (
     cost_aggregator,
     eval_job_runner,
+    ingestion_job_runner,
     rollback_watchdog,
     rollout_stepper,
 )
@@ -93,6 +94,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         asyncio.create_task(rollout_stepper(), name="rollout_stepper"),
         asyncio.create_task(eval_job_runner(), name="eval_job_runner"),
         asyncio.create_task(cost_aggregator(), name="cost_aggregator"),
+        asyncio.create_task(ingestion_job_runner(), name="ingestion_job_runner"),
     ]
 
     yield
@@ -156,6 +158,7 @@ def create_app() -> FastAPI:
     from retrieval_os.api.serving_router import router as serving_router
     from retrieval_os.deployments.router import router as deployments_router
     from retrieval_os.evaluations.router import router as eval_router
+    from retrieval_os.ingestion.router import router as ingestion_router
     from retrieval_os.intelligence.router import router as intelligence_router
     from retrieval_os.lineage.router import router as lineage_router
     from retrieval_os.plans.router import router as plans_router
@@ -172,6 +175,7 @@ def create_app() -> FastAPI:
     app.include_router(intelligence_router)
     app.include_router(tenants_router)
     app.include_router(webhooks_router)
+    app.include_router(ingestion_router)
 
     # ── OTel auto-instrumentation ──────────────────────────────────────────────
     FastAPIInstrumentor.instrument_app(app)

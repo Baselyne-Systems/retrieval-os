@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     rollout_stepper_interval_seconds: int = 10
     eval_job_poll_interval_seconds: int = 5
     cost_aggregator_interval_seconds: int = 3600
+    ingestion_job_poll_interval_seconds: int = 5
 
 
 settings = Settings()

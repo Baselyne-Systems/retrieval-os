@@ -102,6 +102,33 @@ async def eval_job_runner() -> None:
             log.exception("background.eval_job_runner.error")
 
 
+async def ingestion_job_runner() -> None:
+    """
+    Drains QUEUED ingestion jobs from the ingestion_jobs table.
+    Processes one job at a time; uses SELECT FOR UPDATE SKIP LOCKED so
+    multiple API replicas never duplicate work.
+    """
+    from retrieval_os.ingestion.service import process_next_ingestion_job
+
+    interval = settings.ingestion_job_poll_interval_seconds
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            async with async_session_factory() as session:
+                job_id = await process_next_ingestion_job(session)
+                await session.commit()
+                if job_id:
+                    log.info(
+                        "background.ingestion_job_runner.processed",
+                        job_id=job_id,
+                    )
+        except asyncio.CancelledError:
+            log.info("background.ingestion_job_runner.stopped")
+            raise
+        except Exception:
+            log.exception("background.ingestion_job_runner.error")
+
+
 async def cost_aggregator() -> None:
     """
     Aggregates usage_records into cost_entries in 1-hour windows.
