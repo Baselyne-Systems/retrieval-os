@@ -171,24 +171,3 @@ GET    /health
 GET    /ready
 GET    /metrics                                             Prometheus text format
 ```
-
----
-
-## Build Status
-
-| Phase | Status | What it adds |
-|---|---|---|
-| Foundation | Done | FastAPI app, infra stack, OTel, Prometheus, structured logs |
-| Projects & Index Configs | Done | Versioned pipeline configs, validation, config hash deduplication |
-| Serving | Done | Redis cache → embed → Qdrant ANN → response |
-| Deployments | Done | State machine, gradual rollouts, rollback watchdog |
-| Lineage | Done | Artifact DAG, dataset → embedding → index traceability |
-| Evaluation | Done | Recall@k, MRR, NDCG, eval job runner, regression detection |
-| Cost Intelligence | Done | Usage aggregation, cost per project, optimisation recommendations |
-| Production Hardening | Done | Circuit breakers, cross-modal RRF, K8s manifests, load tests |
-| Multimodal | Done | CLIP image embed, Whisper audio→text, sparse BM25 |
-| Multi-tenancy | Done | API key auth, rate limiting, tenant isolation |
-| Webhooks | Done | HMAC-SHA256 signed event delivery with retry |
-| Ingestion | Done | Word-boundary chunker, embed→upsert pipeline, lineage auto-registration |
-
-**432 tests (381 unit + 51 integration), all passing. Linter clean (ruff).**
