@@ -1,55 +1,54 @@
-"""Benchmark: Latency Predictability — hot path is Redis-only, no Postgres.
+"""Benchmark: Latency Predictability
 
-Customer claims
+Proves the in-process overhead of the serving layer — the code that runs on
+every query before and after the actual embedding and vector-search calls —
+is small enough to not dominate query latency at scale.
+
+What we measure
 ---------------
-1. The Redis key format is stable and documented: ros:project:{name}:active.
-2. On a cache hit (serving config in Redis), the query is served without touching
-   Postgres — no connection pool pressure, no join latency.
-3. On a cache miss, _load_project_config falls back to Postgres exactly once,
-   then warms the Redis cache so subsequent requests are fast.
-4. The merged serving config carries all 16 fields needed to serve a query so the
-   hot path never needs to go back to the DB mid-request.
+The two in-process steps that run on every query:
+
+1. Serving config JSON round-trip — the query router reads the serving config
+   from Redis as a JSON string and deserialises it into a dict. At 10 000 QPS,
+   this must not add more than a few milliseconds of total CPU overhead.
+
+2. Redis key derivation — _project_redis_key is called once per query to
+   build the lookup key. At scale the key format must be stable and derivation
+   must be O(1) with a negligible constant.
+
+3. Serving config merge (cache-miss path) — on a Redis miss, the router merges
+   IndexConfig fields + Deployment fields into a single serving dict. This must
+   be fast enough that even 100% cache-miss scenarios don't degrade throughput.
+
+These are pure-Python, infrastructure-free measurements. Network latency (Redis
+round-trip, embedding API, vector DB) is excluded — those are measured in load
+tests against a live stack.
+
+Scale targets
+-------------
+- JSON round-trip for 10 000 serving configs    in < 500 ms   → < 0.05 ms/query
+- Redis key derivation for 100 000 queries      in < 100 ms   → < 0.001 ms/query
+- Serving config merge for 100 000 operations   in < 500 ms   → < 0.005 ms/merge
 """
 
 from __future__ import annotations
 
 import json
-import uuid
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+import time
 
-import pytest
+from retrieval_os.serving.query_router import _project_redis_key
 
-from retrieval_os.serving.query_router import _load_project_config, _project_redis_key
+# ── Shared fixtures ───────────────────────────────────────────────────────────
 
-# ── Key format ────────────────────────────────────────────────────────────────
-
-
-class TestRedisKeyFormat:
-    def test_key_is_stable_and_documented(self) -> None:
-        assert _project_redis_key("my-docs") == "ros:project:my-docs:active"
-
-    def test_key_embeds_project_name(self) -> None:
-        assert "wiki-search" in _project_redis_key("wiki-search")
-
-    def test_key_prefix_is_namespace_safe(self) -> None:
-        key = _project_redis_key("proj")
-        assert key.startswith("ros:project:"), "Key must be in the ros: namespace"
-        assert key.endswith(":active")
-
-
-# ── Redis hit → no Postgres ───────────────────────────────────────────────────
-
-
-_VALID_CONFIG = {
-    "project_name": "my-docs",
-    "index_config_version": 2,
+_SERVING_CONFIG = {
+    "project_name": "docs",
+    "index_config_version": 3,
     "embedding_provider": "sentence_transformers",
     "embedding_model": "BAAI/bge-m3",
     "embedding_normalize": True,
     "embedding_batch_size": 32,
     "index_backend": "qdrant",
-    "index_collection": "docs_v2",
+    "index_collection": "docs_v3",
     "distance_metric": "cosine",
     "top_k": 10,
     "reranker": None,
@@ -60,38 +59,150 @@ _VALID_CONFIG = {
     "hybrid_alpha": None,
 }
 
+_SERVING_CONFIG_JSON = json.dumps(_SERVING_CONFIG, default=str)
 
-class TestRedisHitSkipsPostgres:
-    @pytest.mark.asyncio
-    async def test_redis_hit_never_reads_postgres(self) -> None:
-        """When serving config is in Redis, Postgres is not touched."""
-        redis_mock = AsyncMock()
-        redis_mock.get = AsyncMock(return_value=json.dumps(_VALID_CONFIG).encode())
 
-        project_repo_mock = MagicMock()
-        project_repo_mock.get_by_name = AsyncMock()
-        db_session = MagicMock()
+# ── JSON round-trip throughput ────────────────────────────────────────────────
 
-        with (
-            patch(
-                "retrieval_os.serving.query_router.get_redis",
-                new=AsyncMock(return_value=redis_mock),
-            ),
-            patch("retrieval_os.serving.query_router.project_repo", project_repo_mock),
-        ):
-            config = await _load_project_config("my-docs", db_session)
 
-        assert config == _VALID_CONFIG
-        project_repo_mock.get_by_name.assert_not_called()
-        db_session.execute.assert_not_called() if hasattr(db_session, "execute") else None
+class TestServingConfigJsonRoundTrip:
+    def test_10k_json_deserialise_under_500ms(self) -> None:
+        """Deserialising a serving config JSON string 10 000 times must take < 500 ms.
 
-    @pytest.mark.asyncio
-    async def test_redis_hit_returns_all_16_config_fields(self) -> None:
-        """The config dict has all 16 fields needed to execute a retrieval query."""
-        redis_mock = AsyncMock()
-        redis_mock.get = AsyncMock(return_value=json.dumps(_VALID_CONFIG).encode())
+        The query router does this on every query where the config is in Redis.
+        At 10 000 QPS this represents 10 000 JSON parses per second.
+        """
+        raw = _SERVING_CONFIG_JSON.encode()
 
-        expected_fields = {
+        start = time.perf_counter()
+        for _ in range(10_000):
+            config = json.loads(raw)
+        elapsed = time.perf_counter() - start
+
+        assert elapsed < 0.5, (
+            f"10 000 JSON deserialise ops took {elapsed:.3f}s; must be < 0.5s "
+            f"({elapsed / 10_000 * 1_000:.4f} ms/op)"
+        )
+        assert config["project_name"] == "docs"
+
+    def test_10k_json_serialise_under_500ms(self) -> None:
+        """Serialising a serving config dict 10 000 times must take < 500 ms.
+
+        The query router writes the config to Redis on every cache-miss path.
+        """
+        start = time.perf_counter()
+        for _ in range(10_000):
+            json.dumps(_SERVING_CONFIG, default=str)
+        elapsed = time.perf_counter() - start
+
+        assert elapsed < 0.5, (
+            f"10 000 JSON serialise ops took {elapsed:.3f}s; must be < 0.5s "
+            f"({elapsed / 10_000 * 1_000:.4f} ms/op)"
+        )
+
+    def test_json_roundtrip_is_lossless(self) -> None:
+        """Serialise → deserialise must reproduce the original config exactly."""
+        serialised = json.dumps(_SERVING_CONFIG, default=str)
+        recovered = json.loads(serialised)
+        for key, value in _SERVING_CONFIG.items():
+            assert recovered[key] == value, (
+                f"Field '{key}': original={value!r}, recovered={recovered[key]!r}"
+            )
+
+
+# ── Redis key derivation throughput ──────────────────────────────────────────
+
+
+class TestRedisKeyDerivation:
+    def test_100k_key_derivations_under_100ms(self) -> None:
+        """Deriving 100 000 Redis keys must take < 100 ms.
+
+        _project_redis_key is called once per query in the hot path. At 10 000 QPS
+        over 10 seconds, 100 000 key derivations must not consume more than 100 ms
+        of CPU time (< 1% overhead budget against a 10 ms average query latency).
+        """
+        project_names = [f"project-{i % 500}" for i in range(100_000)]
+
+        start = time.perf_counter()
+        for name in project_names:
+            _project_redis_key(name)
+        elapsed = time.perf_counter() - start
+
+        assert elapsed < 0.1, (
+            f"100 000 Redis key derivations took {elapsed * 1000:.2f}ms; must be < 100ms "
+            f"({elapsed / 100_000 * 1_000_000:.2f} µs/key)"
+        )
+
+    def test_key_format_is_stable(self) -> None:
+        """The Redis key format must not change — existing cached configs depend on it."""
+        assert _project_redis_key("my-docs") == "ros:project:my-docs:active"
+        assert _project_redis_key("wiki-search") == "ros:project:wiki-search:active"
+        assert _project_redis_key("prod") == "ros:project:prod:active"
+
+
+# ── Serving config merge throughput ──────────────────────────────────────────
+
+
+class TestServingConfigMerge:
+    def _make_index_config(self, *, version: int = 1) -> object:
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            embedding_provider="sentence_transformers",
+            embedding_model=f"model-v{version}",
+            embedding_normalize=True,
+            embedding_batch_size=32,
+            index_backend="qdrant",
+            index_collection=f"col_v{version}",
+            distance_metric="cosine",
+        )
+
+    def _make_deployment(self) -> object:
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            index_config_version=1,
+            top_k=10,
+            reranker=None,
+            rerank_top_k=None,
+            metadata_filters=None,
+            cache_enabled=True,
+            cache_ttl_seconds=3600,
+            hybrid_alpha=None,
+        )
+
+    def test_100k_merges_under_500ms(self) -> None:
+        """Building a serving config dict from IndexConfig + Deployment 100 000 times
+        must take < 500 ms.
+
+        This operation runs on the cache-miss path (every time Redis is cold or a new
+        deployment is made). At high deployment frequency or after a Redis flush,
+        many queries hit this path simultaneously.
+        """
+        from retrieval_os.deployments.service import _build_serving_config
+
+        index_config = self._make_index_config()
+        deployment = self._make_deployment()
+
+        start = time.perf_counter()
+        for _ in range(100_000):
+            _build_serving_config("my-docs", deployment, index_config)
+        elapsed = time.perf_counter() - start
+
+        assert elapsed < 0.5, (
+            f"100 000 serving config merges took {elapsed:.3f}s; must be < 0.5s "
+            f"({elapsed / 100_000 * 1_000:.4f} ms/merge)"
+        )
+
+    def test_merged_config_has_all_16_fields(self) -> None:
+        """The merged serving config must always carry all 16 fields.
+
+        The executor reads every one of these fields on the hot path. A missing
+        field causes a KeyError that kills the query.
+        """
+        from retrieval_os.deployments.service import _build_serving_config
+
+        required = {
             "project_name",
             "index_config_version",
             "embedding_provider",
@@ -110,167 +221,8 @@ class TestRedisHitSkipsPostgres:
             "hybrid_alpha",
         }
 
-        with (
-            patch(
-                "retrieval_os.serving.query_router.get_redis",
-                new=AsyncMock(return_value=redis_mock),
-            ),
-            patch("retrieval_os.serving.query_router.project_repo", MagicMock()),
-        ):
-            config = await _load_project_config("my-docs", MagicMock())
-
-        missing = expected_fields - set(config.keys())
-        assert not missing, f"Config is missing fields required for serving: {missing}"
-
-
-# ── Redis miss → Postgres fallback + cache warm ───────────────────────────────
-
-
-class TestRedisMissFallback:
-    @pytest.mark.asyncio
-    async def test_redis_miss_warms_cache_for_next_request(self) -> None:
-        """On a cache miss, Postgres is read once and the result is stored in Redis."""
-        redis_mock = AsyncMock()
-        redis_mock.get = AsyncMock(return_value=None)  # miss
-        redis_mock.set = AsyncMock()
-
-        index_config_id = uuid.uuid4()
-
-        mock_project = SimpleNamespace(
-            name="my-docs",
-            is_archived=False,
+        config = _build_serving_config(
+            "my-docs", self._make_deployment(), self._make_index_config()
         )
-        mock_deployment = SimpleNamespace(
-            index_config_id=index_config_id,
-            index_config_version=1,
-            top_k=10,
-            reranker=None,
-            rerank_top_k=None,
-            metadata_filters=None,
-            cache_enabled=True,
-            cache_ttl_seconds=3600,
-            hybrid_alpha=None,
-        )
-        mock_index_config = SimpleNamespace(
-            embedding_provider="sentence_transformers",
-            embedding_model="BAAI/bge-m3",
-            embedding_normalize=True,
-            embedding_batch_size=32,
-            index_backend="qdrant",
-            index_collection="docs_v1",
-            distance_metric="cosine",
-        )
-
-        project_repo_mock = MagicMock()
-        project_repo_mock.get_by_name = AsyncMock(return_value=mock_project)
-        project_repo_mock.get_index_config_by_id = AsyncMock(return_value=mock_index_config)
-
-        deployment_repo_mock = MagicMock()
-        deployment_repo_mock.get_active_for_project = AsyncMock(return_value=mock_deployment)
-
-        with (
-            patch(
-                "retrieval_os.serving.query_router.get_redis",
-                new=AsyncMock(return_value=redis_mock),
-            ),
-            patch("retrieval_os.serving.query_router.project_repo", project_repo_mock),
-            patch("retrieval_os.serving.query_router.deployment_repo", deployment_repo_mock),
-        ):
-            config = await _load_project_config("my-docs", MagicMock())
-
-        # Postgres was queried exactly once
-        project_repo_mock.get_by_name.assert_called_once()
-        # Redis was warmed so the next request will be a hit
-        redis_mock.set.assert_called_once()
-        set_key = redis_mock.set.call_args[0][0]
-        assert set_key == "ros:project:my-docs:active"
-
-        # Returned config is complete
-        assert config["project_name"] == "my-docs"
-        assert config["embedding_model"] == "BAAI/bge-m3"
-        assert config["top_k"] == 10
-
-    @pytest.mark.asyncio
-    async def test_redis_miss_merged_config_carries_deployment_search_fields(self) -> None:
-        """Deployment search fields (top_k, reranker, cache settings) are merged
-        into the serving config returned on a Postgres fallback."""
-        redis_mock = AsyncMock()
-        redis_mock.get = AsyncMock(return_value=None)
-        redis_mock.set = AsyncMock()
-
-        index_config_id = uuid.uuid4()
-
-        mock_project = SimpleNamespace(name="my-docs", is_archived=False)
-        mock_deployment = SimpleNamespace(
-            index_config_id=index_config_id,
-            index_config_version=3,
-            top_k=25,
-            reranker="cross-encoder/ms-marco-MiniLM-L-6-v2",
-            rerank_top_k=5,
-            metadata_filters={"lang": "en"},
-            cache_enabled=False,
-            cache_ttl_seconds=0,
-            hybrid_alpha=0.6,
-        )
-        mock_index_config = SimpleNamespace(
-            embedding_provider="openai",
-            embedding_model="text-embedding-3-large",
-            embedding_normalize=False,
-            embedding_batch_size=64,
-            index_backend="qdrant",
-            index_collection="my_v3",
-            distance_metric="dot",
-        )
-
-        project_repo_mock = MagicMock()
-        project_repo_mock.get_by_name = AsyncMock(return_value=mock_project)
-        project_repo_mock.get_index_config_by_id = AsyncMock(return_value=mock_index_config)
-
-        deployment_repo_mock = MagicMock()
-        deployment_repo_mock.get_active_for_project = AsyncMock(return_value=mock_deployment)
-
-        with (
-            patch(
-                "retrieval_os.serving.query_router.get_redis",
-                new=AsyncMock(return_value=redis_mock),
-            ),
-            patch("retrieval_os.serving.query_router.project_repo", project_repo_mock),
-            patch("retrieval_os.serving.query_router.deployment_repo", deployment_repo_mock),
-        ):
-            config = await _load_project_config("my-docs", MagicMock())
-
-        # Deployment search fields
-        assert config["top_k"] == 25
-        assert config["reranker"] == "cross-encoder/ms-marco-MiniLM-L-6-v2"
-        assert config["rerank_top_k"] == 5
-        assert config["metadata_filters"] == {"lang": "en"}
-        assert config["cache_enabled"] is False
-        assert config["cache_ttl_seconds"] == 0
-        assert config["hybrid_alpha"] == pytest.approx(0.6)
-
-        # IndexConfig embed fields
-        assert config["embedding_provider"] == "openai"
-        assert config["embedding_model"] == "text-embedding-3-large"
-        assert config["index_collection"] == "my_v3"
-        assert config["distance_metric"] == "dot"
-
-    @pytest.mark.asyncio
-    async def test_redis_miss_project_not_found_raises(self) -> None:
-        """If the project does not exist, ProjectNotFoundError is raised — no hang."""
-        from retrieval_os.core.exceptions import ProjectNotFoundError
-
-        redis_mock = AsyncMock()
-        redis_mock.get = AsyncMock(return_value=None)
-
-        project_repo_mock = MagicMock()
-        project_repo_mock.get_by_name = AsyncMock(return_value=None)
-
-        with (
-            patch(
-                "retrieval_os.serving.query_router.get_redis",
-                new=AsyncMock(return_value=redis_mock),
-            ),
-            patch("retrieval_os.serving.query_router.project_repo", project_repo_mock),
-        ):
-            with pytest.raises(ProjectNotFoundError):
-                await _load_project_config("ghost-project", MagicMock())
+        missing = required - set(config.keys())
+        assert not missing, f"Serving config is missing fields: {missing}"

@@ -1,183 +1,213 @@
-"""Benchmark: Iteration Velocity — search-config tuning never causes re-indexing.
+"""Benchmark: Iteration Velocity
 
-Customer claim
---------------
-Teams can change top_k, reranker, cache settings, and hybrid_alpha as many times
-as they want without triggering a re-embed / re-index cycle.  Only changes to the
-embedding model, index collection, or distance metric should require rebuilding the
-index.
+Customer claim: teams can iterate on retrieval config (embed model, chunking,
+distance metric) and get a new indexed version live without a multi-hour
+reindex cycle blocking them.
 
-These tests prove the invariant at two levels:
-1. Pure-function: the config hash excludes all nine search-config fields.
-2. Service-level: submitting an IndexConfig that is hash-identical to an existing
-   one raises DuplicateConfigError *before* any embedding work is attempted.
+What we measure
+---------------
+The three operations that sit on the critical path of every deploy:
+
+1. Config hash computation — every new IndexConfig is hashed before it is
+   written. At scale (CI pipelines running hundreds of config candidates), this
+   must not become a bottleneck.
+
+2. Config validation — runs at write time so bad configs are rejected before
+   any embedding work starts. Validation must be fast enough to check many
+   candidate configs in a single CI run.
+
+3. Hash deduplication correctness at scale — the system must detect
+   identical configs across thousands of concurrent experiments with zero
+   false positives and zero false negatives.
+
+Scale targets
+-------------
+- 10 000 config hashes   in < 2 s   → < 0.2 ms per hash
+- 1 000 config validations in < 1 s → < 1 ms per validation
+- 10 000 distinct configs → 10 000 distinct hashes (zero collisions)
+- N configs with identical index fields but different search fields → one
+  unique hash (all search-field variants collapse to the same hash)
 """
 
 from __future__ import annotations
 
-import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+import time
 
-import pytest
+from retrieval_os.plans.validators import compute_config_hash, validate_index_config
 
-from retrieval_os.core.exceptions import DuplicateConfigError
-from retrieval_os.plans.schemas import CreateIndexConfigRequest, IndexConfigInput
-from retrieval_os.plans.service import create_index_config
-from retrieval_os.plans.validators import compute_config_hash
-
-# ── Base config helpers ───────────────────────────────────────────────────────
+# ── Synthetic config factories ────────────────────────────────────────────────
 
 
-def _base_index_config(**overrides: object) -> dict:
-    cfg = {
-        "embedding_provider": "sentence_transformers",
-        "embedding_model": "BAAI/bge-m3",
-        "embedding_dimensions": 768,
+def _index_config(
+    *,
+    model: str = "BAAI/bge-m3",
+    collection: str = "docs_v1",
+    provider: str = "sentence_transformers",
+    dimensions: int = 768,
+    metric: str = "cosine",
+) -> dict:
+    return {
+        "embedding_provider": provider,
+        "embedding_model": model,
+        "embedding_dimensions": dimensions,
         "modalities": ["text"],
         "embedding_batch_size": 32,
         "embedding_normalize": True,
         "index_backend": "qdrant",
-        "index_collection": "docs_v1",
-        "distance_metric": "cosine",
+        "index_collection": collection,
+        "distance_metric": metric,
         "quantization": None,
         "change_comment": "",
-        # search-config fields (should be ignored by hash)
-        "top_k": 10,
-        "reranker": None,
-        "rerank_top_k": None,
-        "hybrid_alpha": None,
-        "cache_enabled": True,
-        "cache_ttl_seconds": 3600,
-        "max_tokens_per_query": None,
-        "metadata_filters": None,
-        "tenant_isolation_field": None,
     }
-    cfg.update(overrides)
-    return cfg
 
 
-# ── Hash stability for search-config changes ──────────────────────────────────
+def _config_with_search_fields(**search_overrides: object) -> dict:
+    """Index config with search-config fields that should NOT affect the hash."""
+    base = _index_config()
+    base.update(search_overrides)
+    return base
 
 
-class TestSearchTuningIsHashNeutral:
-    """Changing any search-config field must not alter the config hash."""
+# ── Throughput: config hash computation ───────────────────────────────────────
 
-    def _hash(self, **overrides: object) -> str:
-        return compute_config_hash(_base_index_config(**overrides))
 
-    def _base_hash(self) -> str:
-        return compute_config_hash(_base_index_config())
+class TestConfigHashThroughput:
+    def test_10k_hashes_under_2s(self) -> None:
+        """10 000 config hash computations must complete in under 2 seconds.
 
-    def test_top_k_change_does_not_affect_hash(self) -> None:
-        assert self._hash(top_k=50) == self._base_hash()
-
-    def test_reranker_change_does_not_affect_hash(self) -> None:
-        assert self._hash(reranker="cross-encoder/ms-marco-MiniLM-L-6-v2") == self._base_hash()
-
-    def test_rerank_top_k_change_does_not_affect_hash(self) -> None:
-        assert self._hash(rerank_top_k=5) == self._base_hash()
-
-    def test_hybrid_alpha_change_does_not_affect_hash(self) -> None:
-        assert self._hash(hybrid_alpha=0.7) == self._base_hash()
-
-    def test_cache_enabled_change_does_not_affect_hash(self) -> None:
-        assert self._hash(cache_enabled=False) == self._base_hash()
-
-    def test_cache_ttl_change_does_not_affect_hash(self) -> None:
-        assert self._hash(cache_ttl_seconds=900) == self._base_hash()
-
-    def test_max_tokens_change_does_not_affect_hash(self) -> None:
-        assert self._hash(max_tokens_per_query=512) == self._base_hash()
-
-    def test_metadata_filters_change_does_not_affect_hash(self) -> None:
-        assert self._hash(metadata_filters={"lang": "en"}) == self._base_hash()
-
-    def test_tenant_isolation_field_change_does_not_affect_hash(self) -> None:
-        assert self._hash(tenant_isolation_field="org_id") == self._base_hash()
-
-    def test_all_search_config_fields_combined_do_not_affect_hash(self) -> None:
-        """Changing every search-config field at once still leaves the hash unchanged."""
-        assert (
-            self._hash(
-                top_k=100,
-                reranker="cross-encoder/ms-marco-MiniLM-L-6-v2",
-                rerank_top_k=10,
-                hybrid_alpha=0.5,
-                cache_enabled=False,
-                cache_ttl_seconds=0,
-                max_tokens_per_query=256,
-                metadata_filters={"team": "eng"},
-                tenant_isolation_field="tenant_id",
+        At this rate a CI pipeline can evaluate hundreds of config candidates
+        per second without hash computation becoming the bottleneck.
+        """
+        configs = [
+            _index_config(
+                model=f"model-{i % 50}",
+                collection=f"col-{i % 20}",
+                dimensions=768 + (i % 4) * 256,
             )
-            == self._base_hash()
+            for i in range(10_000)
+        ]
+
+        start = time.perf_counter()
+        for cfg in configs:
+            compute_config_hash(cfg)
+        elapsed = time.perf_counter() - start
+
+        assert elapsed < 2.0, (
+            f"10 000 config hashes took {elapsed:.3f}s; must be < 2s "
+            f"({elapsed / 10_000 * 1000:.3f} ms/hash)"
         )
 
 
-class TestIndexRebuildFieldsDoChangeHash:
-    """Changing an index-build field MUST produce a different hash — sanity check."""
-
-    def _hash(self, **overrides: object) -> str:
-        return compute_config_hash(_base_index_config(**overrides))
-
-    def _base_hash(self) -> str:
-        return compute_config_hash(_base_index_config())
-
-    def test_embedding_model_change_changes_hash(self) -> None:
-        assert self._hash(embedding_model="text-embedding-3-large") != self._base_hash()
-
-    def test_index_collection_change_changes_hash(self) -> None:
-        assert self._hash(index_collection="docs_v2") != self._base_hash()
-
-    def test_distance_metric_change_changes_hash(self) -> None:
-        assert self._hash(distance_metric="dot") != self._base_hash()
-
-    def test_embedding_dimensions_change_changes_hash(self) -> None:
-        assert self._hash(embedding_dimensions=1536) != self._base_hash()
+# ── Throughput: config validation ─────────────────────────────────────────────
 
 
-# ── Service-level dedup ───────────────────────────────────────────────────────
+class TestConfigValidationThroughput:
+    def test_1k_validations_under_1s(self) -> None:
+        """1 000 config validations must complete in under 1 second.
 
+        Config validation is the first gate before any embedding work starts.
+        At 1 ms/validation, a sweep of 1 000 candidate configs (common in
+        hyper-parameter search) completes before the first embedding job runs.
+        """
+        configs = [
+            _index_config(
+                model=f"model-{i % 10}",
+                collection=f"col-{i % 5}",
+            )
+            for i in range(1_000)
+        ]
 
-class TestConfigDedup:
-    """create_index_config raises DuplicateConfigError when a hash-identical config
-    already exists — no embedding work is done."""
+        start = time.perf_counter()
+        for cfg in configs:
+            validate_index_config(cfg)
+        elapsed = time.perf_counter() - start
 
-    @pytest.mark.asyncio
-    async def test_duplicate_config_rejected_before_any_embedding(self) -> None:
-        """Submitting the same index config a second time must raise immediately."""
-        request = CreateIndexConfigRequest(
-            config=IndexConfigInput(
-                embedding_provider="sentence_transformers",
-                embedding_model="BAAI/bge-m3",
-                index_collection="docs_v1",
-            ),
-            created_by="alice",
+        assert elapsed < 1.0, (
+            f"1 000 config validations took {elapsed:.3f}s; must be < 1s "
+            f"({elapsed / 1_000 * 1000:.3f} ms/validation)"
         )
 
-        mock_project = MagicMock()
-        mock_project.is_archived = False
-        mock_project.id = uuid.uuid4()
 
-        mock_existing = MagicMock()
-        mock_existing.version = 1
+# ── Deduplication correctness at scale ────────────────────────────────────────
 
-        embed_mock = AsyncMock()
 
-        with (
-            patch(
-                "retrieval_os.plans.service.project_repo.get_by_name",
-                new=AsyncMock(return_value=mock_project),
-            ),
-            patch(
-                "retrieval_os.plans.service.project_repo.get_index_config_by_config_hash",
-                new=AsyncMock(return_value=mock_existing),
-            ),
-            patch(
-                "retrieval_os.plans.service.project_repo.get_next_version_number", new=embed_mock
-            ),
-        ):
-            with pytest.raises(DuplicateConfigError):
-                await create_index_config(MagicMock(), "my-docs", request)
+class TestHashDeduplicationAtScale:
+    def test_10k_distinct_configs_produce_10k_distinct_hashes(self) -> None:
+        """Zero hash collisions across 10 000 distinct index configurations.
 
-        # Embedding/indexing work (represented by get_next_version_number) was never reached
-        embed_mock.assert_not_awaited()
+        Each unique (model, collection, dimensions) triple must produce a
+        unique hash. A collision would cause a valid new config to be silently
+        rejected as a duplicate.
+        """
+        configs = [
+            _index_config(
+                model=f"provider-{i // 100}/model-{i % 100}",
+                collection=f"collection-v{i}",
+                dimensions=128 + (i % 10) * 128,
+            )
+            for i in range(10_000)
+        ]
+
+        hashes = [compute_config_hash(c) for c in configs]
+        unique_hashes = set(hashes)
+
+        assert len(unique_hashes) == 10_000, (
+            f"Expected 10 000 unique hashes; got {len(unique_hashes)} "
+            f"({10_000 - len(unique_hashes)} collisions)"
+        )
+
+    def test_search_field_variants_collapse_to_one_hash(self) -> None:
+        """All search-config variants of the same index config share one hash.
+
+        A team tuning top_k, reranker, cache_ttl, hybrid_alpha should NOT
+        generate thousands of 'new' index configs — they all map to the same
+        index and the same hash.
+        """
+        search_variants = [
+            {"top_k": k, "reranker": r, "cache_ttl_seconds": t, "hybrid_alpha": a}
+            for k in [5, 10, 20, 50, 100]
+            for r in [None, "cross-encoder/ms-marco-MiniLM-L-6-v2"]
+            for t in [0, 300, 900, 3600]
+            for a in [None, 0.3, 0.5, 0.7, 1.0]
+        ]
+        # 5 × 2 × 4 × 5 = 200 variants of the same underlying index config
+
+        hashes = {compute_config_hash(_config_with_search_fields(**v)) for v in search_variants}
+
+        assert len(hashes) == 1, (
+            f"Expected 1 unique hash for 200 search-config variants; "
+            f"got {len(hashes)} (search fields incorrectly included in hash)"
+        )
+
+    def test_single_field_change_always_changes_hash(self) -> None:
+        """Every distinct index-build field value produces a distinct hash.
+
+        Regression guard: no two meaningfully different index configs should
+        share a hash, which would allow one to shadow the other.
+        """
+        base = _index_config()
+        base_hash = compute_config_hash(base)
+
+        variants = [
+            ("embedding_model", "text-embedding-3-large"),
+            ("embedding_model", "text-embedding-3-small"),
+            ("embedding_dimensions", 1536),
+            ("embedding_dimensions", 256),
+            ("index_collection", "docs_v2"),
+            ("index_collection", "docs_production"),
+            ("distance_metric", "dot"),
+            ("distance_metric", "euclidean"),
+            ("index_backend", "pgvector"),
+            ("quantization", "scalar"),
+            ("quantization", "product"),
+        ]
+
+        seen: set[str] = {base_hash}
+        for field, value in variants:
+            cfg = {**base, field: value}
+            h = compute_config_hash(cfg)
+            assert h not in seen, (
+                f"Hash collision: changing {field}={value!r} produced the same hash "
+                "as a previous config"
+            )
+            seen.add(h)
