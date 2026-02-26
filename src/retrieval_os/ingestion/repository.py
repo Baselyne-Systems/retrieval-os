@@ -20,10 +20,10 @@ class IngestionRepository:
     async def get(self, session: AsyncSession, job_id: str) -> IngestionJob | None:
         return await session.get(IngestionJob, job_id)
 
-    async def list_for_plan(
+    async def list_for_project(
         self,
         session: AsyncSession,
-        plan_name: str,
+        project_name: str,
         *,
         offset: int = 0,
         limit: int = 50,
@@ -31,13 +31,13 @@ class IngestionRepository:
         count_result = await session.execute(
             select(func.count())
             .select_from(IngestionJob)
-            .where(IngestionJob.plan_name == plan_name)
+            .where(IngestionJob.project_name == project_name)
         )
         total: int = count_result.scalar_one()
 
         result = await session.execute(
             select(IngestionJob)
-            .where(IngestionJob.plan_name == plan_name)
+            .where(IngestionJob.project_name == project_name)
             .order_by(IngestionJob.created_at.desc())
             .offset(offset)
             .limit(limit)

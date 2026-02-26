@@ -19,13 +19,13 @@ def _make_deployment(
     recall_threshold: float | None = None,
     error_threshold: float | None = None,
     status: str = DeploymentStatus.ACTIVE.value,
-    plan_name: str = "acme",
+    project_name: str = "acme",
     index_config_version: int = 1,
 ) -> Deployment:
     now = datetime.now(UTC)
     return Deployment(
         id="dep-001",
-        plan_name=plan_name,
+        project_name=project_name,
         index_config_version=index_config_version,
         status=status,
         traffic_weight=1.0,
@@ -46,8 +46,8 @@ def _make_eval(
 ) -> SimpleNamespace:
     return SimpleNamespace(
         id="eval-001",
-        plan_name="acme",
-        plan_version=1,
+        project_name="acme",
+        index_config_version=1,
         recall_at_5=recall_at_5,
         total_queries=total_queries,
         failed_queries=failed_queries,
@@ -90,7 +90,7 @@ class TestWatchdogNoOp:
                 new=AsyncMock(return_value=[dep]),
             ),
             patch(
-                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_project",
                 new=AsyncMock(return_value=None),
             ),
         ):
@@ -108,7 +108,7 @@ class TestWatchdogNoOp:
                 new=AsyncMock(return_value=[dep]),
             ),
             patch(
-                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_project",
                 new=AsyncMock(return_value=eval_job),
             ),
         ):
@@ -126,7 +126,7 @@ class TestWatchdogNoOp:
                 new=AsyncMock(return_value=[dep]),
             ),
             patch(
-                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_project",
                 new=AsyncMock(return_value=eval_job),
             ),
         ):
@@ -144,7 +144,7 @@ class TestWatchdogNoOp:
                 new=AsyncMock(return_value=[dep]),
             ),
             patch(
-                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_project",
                 new=AsyncMock(return_value=eval_job),
             ),
         ):
@@ -168,7 +168,7 @@ class TestWatchdogTriggersRollback:
                 new=AsyncMock(return_value=[dep]),
             ),
             patch(
-                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_project",
                 new=AsyncMock(return_value=eval_job),
             ),
             patch(
@@ -196,7 +196,7 @@ class TestWatchdogTriggersRollback:
                 new=AsyncMock(return_value=[dep]),
             ),
             patch(
-                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_project",
                 new=AsyncMock(return_value=eval_job),
             ),
             patch(
@@ -227,7 +227,7 @@ class TestWatchdogTriggersRollback:
                 new=AsyncMock(return_value=[dep]),
             ),
             patch(
-                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_project",
                 new=AsyncMock(return_value=eval_job),
             ),
             patch(
@@ -243,8 +243,8 @@ class TestWatchdogTriggersRollback:
     @pytest.mark.asyncio
     async def test_multiple_deployments_each_checked(self) -> None:
         deps = [
-            _make_deployment(recall_threshold=0.75, plan_name="plan-a"),
-            _make_deployment(recall_threshold=0.75, plan_name="plan-b"),
+            _make_deployment(recall_threshold=0.75, project_name="plan-a"),
+            _make_deployment(recall_threshold=0.75, project_name="plan-b"),
         ]
         deps[0].id = "dep-a"
         deps[1].id = "dep-b"
@@ -257,7 +257,7 @@ class TestWatchdogTriggersRollback:
                 new=AsyncMock(return_value=deps),
             ),
             patch(
-                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_project",
                 new=AsyncMock(return_value=eval_job),
             ),
             patch(
@@ -282,7 +282,7 @@ class TestWatchdogTriggersRollback:
                 new=AsyncMock(return_value=[dep]),
             ),
             patch(
-                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_project",
                 new=AsyncMock(return_value=eval_job),
             ),
             patch(
@@ -307,7 +307,7 @@ class TestWatchdogTriggersRollback:
                 new=AsyncMock(return_value=[dep]),
             ),
             patch(
-                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_project",
                 new=AsyncMock(return_value=eval_job),
             ),
             patch(

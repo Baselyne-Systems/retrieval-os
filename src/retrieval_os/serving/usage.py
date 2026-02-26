@@ -21,8 +21,8 @@ log = logging.getLogger(__name__)
 _usage_records = sa.table(
     "usage_records",
     sa.column("id", sa.String),
-    sa.column("plan_name", sa.String),
-    sa.column("plan_version", sa.Integer),
+    sa.column("project_name", sa.String),
+    sa.column("index_config_version", sa.Integer),
     sa.column("query_chars", sa.Integer),
     sa.column("result_count", sa.Integer),
     sa.column("cache_hit", sa.Boolean),
@@ -35,8 +35,8 @@ async def _write_usage(
     session_factory: async_sessionmaker,
     *,
     record_id: str,
-    plan_name: str,
-    plan_version: int,
+    project_name: str,
+    index_config_version: int,
     query_chars: int,
     result_count: int,
     cache_hit: bool,
@@ -47,8 +47,8 @@ async def _write_usage(
             await session.execute(
                 sa.insert(_usage_records).values(
                     id=record_id,
-                    plan_name=plan_name,
-                    plan_version=plan_version,
+                    project_name=project_name,
+                    index_config_version=index_config_version,
                     query_chars=query_chars,
                     result_count=result_count,
                     cache_hit=cache_hit,
@@ -58,15 +58,15 @@ async def _write_usage(
             )
             await session.commit()
     except Exception:
-        log.warning("usage.write_failed", extra={"plan": plan_name})
+        log.warning("usage.write_failed", extra={"project": project_name})
 
 
 def fire_usage_record(
     session_factory: async_sessionmaker,
     *,
     record_id: str,
-    plan_name: str,
-    plan_version: int,
+    project_name: str,
+    index_config_version: int,
     query_chars: int,
     result_count: int,
     cache_hit: bool,
@@ -77,12 +77,12 @@ def fire_usage_record(
         _write_usage(
             session_factory,
             record_id=record_id,
-            plan_name=plan_name,
-            plan_version=plan_version,
+            project_name=project_name,
+            index_config_version=index_config_version,
             query_chars=query_chars,
             result_count=result_count,
             cache_hit=cache_hit,
             latency_ms=latency_ms,
         ),
-        name=f"usage_write_{plan_name}",
+        name=f"usage_write_{project_name}",
     )

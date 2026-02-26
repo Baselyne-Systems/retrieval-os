@@ -60,8 +60,8 @@ class TestCostEntryModel:
 
         entry = CostEntry(
             id="entry-id",
-            plan_name="wiki-search",
-            plan_version=1,
+            project_name="wiki-search",
+            index_config_version=1,
             window_start=now,
             window_end=now + timedelta(hours=1),
             provider="openai",
@@ -73,7 +73,7 @@ class TestCostEntryModel:
             created_at=now,
             updated_at=now,
         )
-        assert entry.plan_name == "wiki-search"
+        assert entry.project_name == "wiki-search"
         assert entry.total_queries == 500
         assert entry.estimated_cost_usd == pytest.approx(0.0025)
 

@@ -39,7 +39,7 @@ class ModelPricing(Base):
 
 
 class CostEntry(Base):
-    """Hourly cost aggregation for a (plan, version, provider, model) tuple.
+    """Hourly cost aggregation for a (project, version, provider, model) tuple.
 
     Populated by the cost_aggregator background loop. Idempotent — re-running
     the aggregator over the same window updates existing rows via upsert.
@@ -51,8 +51,8 @@ class CostEntry(Base):
     __tablename__ = "cost_entries"
     __table_args__ = (
         UniqueConstraint(
-            "plan_name",
-            "plan_version",
+            "project_name",
+            "index_config_version",
             "window_start",
             "provider",
             "model",
@@ -63,8 +63,8 @@ class CostEntry(Base):
     id: Mapped[str] = mapped_column(
         PG_UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid7())
     )
-    plan_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    plan_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    project_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    index_config_version: Mapped[int] = mapped_column(Integer, nullable=False)
     # UTC hour boundary, e.g. 2026-02-25 14:00:00+00
     window_start: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True

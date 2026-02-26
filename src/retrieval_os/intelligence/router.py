@@ -42,18 +42,18 @@ async def add_model_pricing(
 
 @router.get("/cost/summary", response_model=CostSummaryResponse)
 async def get_cost_summary(
-    plan_name: str | None = Query(None, description="Filter to a single plan"),
+    project_name: str | None = Query(None, description="Filter to a single project"),
     since: datetime | None = Query(None, description="Start of window (default: 7 days ago)"),
     until: datetime | None = Query(None, description="End of window (default: now)"),
     db: AsyncSession = Depends(get_db),
 ) -> CostSummaryResponse:
-    """Return aggregated cost summary per plan for the requested time window."""
-    return await service.get_cost_summary(db, since=since, until=until, plan_name=plan_name)
+    """Return aggregated cost summary per project for the requested time window."""
+    return await service.get_cost_summary(db, since=since, until=until, project_name=project_name)
 
 
 @router.get("/cost/entries", response_model=dict)
 async def list_cost_entries(
-    plan_name: str | None = Query(None),
+    project_name: str | None = Query(None),
     since: datetime | None = Query(None),
     until: datetime | None = Query(None),
     limit: int = Query(200, ge=1, le=1000),
@@ -62,14 +62,14 @@ async def list_cost_entries(
 ) -> dict:
     """List raw hourly cost entries, newest first."""
     entries, total = await service.list_cost_entries(
-        db, plan_name=plan_name, since=since, until=until, limit=limit, offset=offset
+        db, project_name=project_name, since=since, until=until, limit=limit, offset=offset
     )
     return {"items": [e.model_dump() for e in entries], "total": total}
 
 
 @router.get("/recommendations", response_model=RecommendationsResponse)
 async def get_recommendations(
-    plan_name: str | None = Query(None, description="Scope to a single plan"),
+    project_name: str | None = Query(None, description="Scope to a single project"),
     db: AsyncSession = Depends(get_db),
 ) -> RecommendationsResponse:
     """Return rule-based cost and performance recommendations.
@@ -80,4 +80,4 @@ async def get_recommendations(
     - Cost per query > $0.001 → consider a smaller embedding model
     - top_k > 20 → consider reducing retrieval width
     """
-    return await service.get_recommendations(db, plan_name=plan_name)
+    return await service.get_recommendations(db, project_name=project_name)

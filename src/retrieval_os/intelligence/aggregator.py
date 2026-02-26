@@ -1,7 +1,7 @@
 """Cost aggregation logic for the Cost Intelligence domain.
 
 The aggregator reads usage_records, groups them into 1-hour windows, looks up
-the embedding cost for each plan version, and upserts cost_entries.
+the embedding cost for each project version, and upserts cost_entries.
 
 It processes the last `lookback_hours` complete UTC hours on every run, making
 it naturally idempotent via the upsert. If the aggregator was stopped for a
@@ -43,11 +43,11 @@ async def aggregate_usage_costs(
     current_hour = now.replace(minute=0, second=0, microsecond=0)
     since = current_hour - timedelta(hours=lookback_hours)
 
-    # One query to get all (plan_name, plan_version, hour) buckets
+    # One query to get all (project_name, index_config_version, hour) buckets
     usage_sql = textwrap.dedent("""
         SELECT
-            u.plan_name,
-            u.plan_version,
+            u.project_name,
+            u.index_config_version,
             date_trunc('hour', u.created_at) AS window_start,
             COUNT(*)                          AS total_queries,
             SUM(CASE WHEN u.cache_hit THEN 1 ELSE 0 END) AS cache_hits,
@@ -55,7 +55,7 @@ async def aggregate_usage_costs(
         FROM usage_records u
         WHERE u.created_at >= :since
           AND u.created_at <  :until
-        GROUP BY u.plan_name, u.plan_version, date_trunc('hour', u.created_at)
+        GROUP BY u.project_name, u.index_config_version, date_trunc('hour', u.created_at)
         ORDER BY window_start
     """)
     result = await session.execute(
@@ -72,18 +72,18 @@ async def aggregate_usage_costs(
 
     upserted = 0
     for row in rows:
-        plan_name: str = row.plan_name
-        plan_version: int = row.plan_version
+        project_name: str = row.project_name
+        index_config_version: int = row.index_config_version
         window_start: datetime = row.window_start.replace(tzinfo=UTC)
         window_end = window_start + timedelta(hours=1)
         total_queries: int = row.total_queries
         cache_hits: int = row.cache_hits
         total_chars: int = row.total_chars or 0
 
-        # Load plan version embedding config
-        provider, model = await _get_plan_embedding(session, plan_name, plan_version)
+        # Load project version embedding config
+        provider, model = await _get_project_embedding(session, project_name, index_config_version)
         if provider is None:
-            # Plan version no longer exists — skip
+            # Project version no longer exists — skip
             continue
 
         # Look up pricing (cached)
@@ -100,8 +100,8 @@ async def aggregate_usage_costs(
         await intel_repo.upsert_cost_entry(
             session,
             id=str(uuid7()),
-            plan_name=plan_name,
-            plan_version=plan_version,
+            project_name=project_name,
+            index_config_version=index_config_version,
             window_start=window_start,
             window_end=window_end,
             provider=provider,
@@ -126,10 +126,10 @@ async def aggregate_usage_costs(
     return upserted
 
 
-async def _get_plan_embedding(
-    session: AsyncSession, plan_name: str, plan_version: int
+async def _get_project_embedding(
+    session: AsyncSession, project_name: str, index_config_version: int
 ) -> tuple[str | None, str | None]:
-    """Return (provider, model) for a plan version, or (None, None) if missing."""
+    """Return (provider, model) for a project version, or (None, None) if missing."""
     from sqlalchemy import select
 
     from retrieval_os.plans.models import IndexConfig, Project
@@ -137,7 +137,7 @@ async def _get_plan_embedding(
     result = await session.execute(
         select(IndexConfig.embedding_provider, IndexConfig.embedding_model)
         .join(Project, IndexConfig.project_id == Project.id)
-        .where(Project.name == plan_name, IndexConfig.version == plan_version)
+        .where(Project.name == project_name, IndexConfig.version == index_config_version)
     )
     row = result.one_or_none()
     if row is None:

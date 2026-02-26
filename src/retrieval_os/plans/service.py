@@ -26,7 +26,7 @@ from retrieval_os.plans.schemas import (
     decode_cursor,
     encode_cursor,
 )
-from retrieval_os.plans.validators import compute_config_hash, validate_plan_config
+from retrieval_os.plans.validators import compute_config_hash, validate_index_config
 
 
 async def create_project(
@@ -39,7 +39,7 @@ async def create_project(
 
     # 2. Validate config semantics
     config_dict = request.config.model_dump()
-    validate_plan_config(config_dict)
+    validate_index_config(config_dict)
 
     # 3. Config hash
     config_hash = compute_config_hash(config_dict)
@@ -73,8 +73,8 @@ async def create_project(
     await session.flush()
     await session.refresh(project)
 
-    metrics.plans_total.inc()
-    metrics.plan_versions_total.labels(plan_name=project.name).inc()
+    metrics.projects_total.inc()
+    metrics.index_configs_total.labels(project_name=project.name).inc()
 
     return ProjectResponse.model_validate(project)
 
@@ -120,7 +120,7 @@ async def create_index_config(
 
     # 2. Validate
     config_dict = request.config.model_dump()
-    validate_plan_config(config_dict)
+    validate_index_config(config_dict)
 
     # 3. Dedup by config hash
     config_hash = compute_config_hash(config_dict)
@@ -157,7 +157,7 @@ async def create_index_config(
             detail={"config_hash": config_hash},
         )
 
-    metrics.plan_versions_total.labels(plan_name=project.name).inc()
+    metrics.index_configs_total.labels(project_name=project.name).inc()
 
     return IndexConfigResponse.model_validate(index_config)
 
@@ -238,8 +238,8 @@ async def clone_project(
     await session.flush()
     await session.refresh(new_project)
 
-    metrics.plans_total.inc()
-    metrics.plan_versions_total.labels(plan_name=new_project.name).inc()
+    metrics.projects_total.inc()
+    metrics.index_configs_total.labels(project_name=new_project.name).inc()
 
     return ProjectResponse.model_validate(new_project)
 

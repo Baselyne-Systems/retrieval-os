@@ -58,7 +58,7 @@ async def add_model_pricing(
 
 async def list_cost_entries(
     session: AsyncSession,
-    plan_name: str | None = None,
+    project_name: str | None = None,
     since: datetime | None = None,
     until: datetime | None = None,
     limit: int = 200,
@@ -71,7 +71,7 @@ async def list_cost_entries(
 
     entries, total = await intel_repo.list_entries(
         session,
-        plan_name=plan_name,
+        project_name=project_name,
         since=since,
         until=until,
         limit=limit,
@@ -87,14 +87,16 @@ async def get_cost_summary(
     session: AsyncSession,
     since: datetime | None = None,
     until: datetime | None = None,
-    plan_name: str | None = None,
+    project_name: str | None = None,
 ) -> CostSummaryResponse:
     if since is None:
         since = datetime.now(UTC) - timedelta(days=7)
     if until is None:
         until = datetime.now(UTC)
 
-    rows = await intel_repo.get_summary(session, since=since, until=until, plan_name=plan_name)
+    rows = await intel_repo.get_summary(
+        session, since=since, until=until, project_name=project_name
+    )
 
     summary_rows: list[CostSummaryRow] = []
     grand_total = 0.0
@@ -105,7 +107,7 @@ async def get_cost_summary(
         grand_total += cost
         summary_rows.append(
             CostSummaryRow(
-                plan_name=row["plan_name"],
+                project_name=row["project_name"],
                 total_queries=total_q,
                 cache_hits=cache_h,
                 cache_hit_rate=cache_h / total_q if total_q > 0 else 0.0,
@@ -117,7 +119,7 @@ async def get_cost_summary(
 
     # Update Prometheus cache efficiency gauges
     for row in summary_rows:
-        metrics.cache_efficiency_ratio.labels(plan_name=row.plan_name).set(row.cache_hit_rate)
+        metrics.cache_efficiency_ratio.labels(project_name=row.project_name).set(row.cache_hit_rate)
 
     return CostSummaryResponse(
         since=since, until=until, rows=summary_rows, grand_total_usd=grand_total
@@ -129,39 +131,39 @@ async def get_cost_summary(
 
 async def get_recommendations(
     session: AsyncSession,
-    plan_name: str | None = None,
+    project_name: str | None = None,
 ) -> RecommendationsResponse:
-    """Compute rule-based recommendations from recent cost data and plan config."""
+    """Compute rule-based recommendations from recent cost data and project config."""
     since = datetime.now(UTC) - timedelta(days=1)
     until = datetime.now(UTC)
 
     # Get cost summary for last 24 h
     summary_rows = await intel_repo.get_summary(
-        session, since=since, until=until, plan_name=plan_name
+        session, since=since, until=until, project_name=project_name
     )
-    summary_by_plan = {r["plan_name"]: r for r in summary_rows}
+    summary_by_project = {r["project_name"]: r for r in summary_rows}
 
-    # Get current plan version configs for plans that have usage
-    plan_names = list(summary_by_plan) if summary_by_plan else []
-    if plan_name and plan_name not in plan_names:
-        plan_names.append(plan_name)
+    # Get current index config for projects that have usage
+    project_names = list(summary_by_project) if summary_by_project else []
+    if project_name and project_name not in project_names:
+        project_names.append(project_name)
 
-    # Load active deployments with their index configs for plans that have usage
+    # Load active deployments with their index configs for projects that have usage
     plan_stats: list[PlanStats] = []
-    if plan_names:
+    if project_names:
         result = await session.execute(
             select(Deployment, IndexConfig.embedding_provider, IndexConfig.embedding_model)
             .join(IndexConfig, Deployment.index_config_id == IndexConfig.id)
             .join(Project, IndexConfig.project_id == Project.id)
             .where(
-                Project.name.in_(plan_names),
+                Project.name.in_(project_names),
                 Deployment.status == DeploymentStatus.ACTIVE.value,
             )
         )
         for row in result:
             dep, emb_provider, emb_model = row
-            pname = dep.plan_name
-            cost_row = summary_by_plan.get(pname, {})
+            pname = dep.project_name
+            cost_row = summary_by_project.get(pname, {})
             plan_stats.append(
                 PlanStats(
                     plan_name=pname,
@@ -184,7 +186,7 @@ async def get_recommendations(
         total=len(recs),
         items=[
             Recommendation(
-                plan_name=r.plan_name,
+                project_name=r.plan_name,
                 category=r.category,
                 priority=r.priority,
                 message=r.message,

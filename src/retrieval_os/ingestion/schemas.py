@@ -62,7 +62,7 @@ class IngestionJobResponse(BaseModel):
     model_config = {"from_attributes": True}
 
     id: str
-    plan_name: str
+    project_name: str
     index_config_id: uuid.UUID
     index_config_version: int
     source_uri: str | None

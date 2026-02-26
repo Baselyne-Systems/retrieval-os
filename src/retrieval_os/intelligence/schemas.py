@@ -29,8 +29,8 @@ class CostEntryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    plan_name: str
-    plan_version: int
+    project_name: str
+    index_config_version: int
     window_start: datetime
     window_end: datetime
     provider: str
@@ -44,7 +44,7 @@ class CostEntryResponse(BaseModel):
 
 
 class CostSummaryRow(BaseModel):
-    plan_name: str
+    project_name: str
     total_queries: int
     cache_hits: int
     cache_hit_rate: float
@@ -61,7 +61,7 @@ class CostSummaryResponse(BaseModel):
 
 
 class Recommendation(BaseModel):
-    plan_name: str
+    project_name: str
     category: str  # "cache", "model", "top_k"
     priority: str  # "high", "medium", "low"
     message: str

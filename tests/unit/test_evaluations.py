@@ -38,16 +38,16 @@ class TestEvalJobModel:
         now = datetime.now(UTC)
         job = EvalJob(
             id="test-id",
-            plan_name="wiki-search",
-            plan_version=3,
+            project_name="wiki-search",
+            index_config_version=3,
             status=EvalJobStatus.QUEUED,
             dataset_uri="s3://bucket/eval/wiki.jsonl",
             top_k=10,
             created_at=now,
             created_by="alice",
         )
-        assert job.plan_name == "wiki-search"
-        assert job.plan_version == 3
+        assert job.project_name == "wiki-search"
+        assert job.index_config_version == 3
         assert job.status == "QUEUED"
         assert job.recall_at_5 is None
         assert job.regression_detected is None
@@ -61,13 +61,13 @@ class TestQueueEvalJobRequest:
         from retrieval_os.evaluations.schemas import QueueEvalJobRequest
 
         req = QueueEvalJobRequest(
-            plan_name="wiki-search",
-            plan_version=1,
+            project_name="wiki-search",
+            index_config_version=1,
             dataset_uri="s3://bucket/eval/wiki.jsonl",
             top_k=10,
             created_by="alice",
         )
-        assert req.plan_name == "wiki-search"
+        assert req.project_name == "wiki-search"
         assert req.top_k == 10
 
     def test_top_k_must_be_positive(self) -> None:
@@ -75,20 +75,20 @@ class TestQueueEvalJobRequest:
 
         with pytest.raises(Exception):
             QueueEvalJobRequest(
-                plan_name="x",
-                plan_version=1,
+                project_name="x",
+                index_config_version=1,
                 dataset_uri="s3://bucket/x.jsonl",
                 top_k=0,
                 created_by="alice",
             )
 
-    def test_plan_version_must_be_positive(self) -> None:
+    def test_index_config_version_must_be_positive(self) -> None:
         from retrieval_os.evaluations.schemas import QueueEvalJobRequest
 
         with pytest.raises(Exception):
             QueueEvalJobRequest(
-                plan_name="x",
-                plan_version=0,
+                project_name="x",
+                index_config_version=0,
                 dataset_uri="s3://bucket/x.jsonl",
                 top_k=10,
                 created_by="alice",

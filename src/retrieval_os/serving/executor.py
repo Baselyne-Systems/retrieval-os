@@ -1,14 +1,14 @@
 """Retrieval Executor — orchestrates the full query pipeline.
 
 Flow:
-  1. Cache lookup (Redis, keyed by plan+version+query+top_k)
+  1. Cache lookup (Redis, keyed by project+version+query+top_k)
   2. Embed query text
   3. Vector search
   4. Optional rerank (stub — Phase 8)
   5. Cache set
   6. Return results
 
-The executor never reads Postgres on the hot path. Plan config is passed in
+The executor never reads Postgres on the hot path. Project config is passed in
 by the query router, which fetches it from Redis (refreshed async from Postgres).
 """
 
@@ -46,10 +46,10 @@ class RetrievedChunk:
 
 async def execute_retrieval(
     *,
-    plan_name: str,
+    project_name: str,
     version: int,
     query: str,
-    # Plan config (passed in — never loaded from DB here)
+    # Project config (passed in — never loaded from DB here)
     embedding_provider: str,
     embedding_model: str,
     embedding_normalize: bool,
@@ -75,9 +75,9 @@ async def execute_retrieval(
     # 1. Cache lookup ──────────────────────────────────────────────────────────
     cache_hit = False
     if cache_enabled:
-        cached = await cache_get(plan_name, version, query, top_k)
+        cached = await cache_get(project_name, version, query, top_k)
         if cached is not None:
-            metrics.cache_hits_total.labels(plan_name=plan_name).inc()
+            metrics.cache_hits_total.labels(project_name=project_name).inc()
             cache_hit = True
             chunks = [
                 RetrievedChunk(
@@ -88,10 +88,10 @@ async def execute_retrieval(
                 )
                 for c in cached
             ]
-            _record_latency(plan_name, start)
+            _record_latency(project_name, start)
             return chunks, cache_hit
 
-    metrics.cache_misses_total.labels(plan_name=plan_name).inc()
+    metrics.cache_misses_total.labels(project_name=project_name).inc()
 
     # 2. Embed ─────────────────────────────────────────────────────────────────
     vectors = await embed_text(
@@ -143,7 +143,7 @@ async def execute_retrieval(
     # 6. Cache set ─────────────────────────────────────────────────────────────
     if cache_enabled:
         await cache_set(
-            plan_name,
+            project_name,
             version,
             query,
             top_k,
@@ -151,11 +151,11 @@ async def execute_retrieval(
             ttl_seconds=cache_ttl_seconds,
         )
 
-    _record_latency(plan_name, start)
+    _record_latency(project_name, start)
     return chunks, cache_hit
 
 
-def _record_latency(plan_name: str, start: float) -> None:
+def _record_latency(project_name: str, start: float) -> None:
     elapsed = time.perf_counter() - start
-    metrics.retrieval_latency_seconds.labels(plan_name=plan_name).observe(elapsed)
-    metrics.retrieval_requests_total.labels(plan_name=plan_name).inc()
+    metrics.retrieval_latency_seconds.labels(project_name=project_name).observe(elapsed)
+    metrics.retrieval_requests_total.labels(project_name=project_name).inc()

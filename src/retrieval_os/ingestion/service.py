@@ -109,7 +109,7 @@ async def _register_ingestion_lineage(
             LineageArtifact(
                 id=str(uuid7()),
                 artifact_type=ArtifactType.DATASET_SNAPSHOT.value,
-                name=f"{job.plan_name}-dataset-v{job.index_config_version}",
+                name=f"{job.project_name}-dataset-v{job.index_config_version}",
                 version=str(job.index_config_version),
                 storage_uri=dataset_uri,
                 content_hash=None,
@@ -130,7 +130,7 @@ async def _register_ingestion_lineage(
             LineageArtifact(
                 id=str(uuid7()),
                 artifact_type=ArtifactType.EMBEDDING_ARTIFACT.value,
-                name=f"{job.plan_name}-embeddings-v{job.index_config_version}",
+                name=f"{job.project_name}-embeddings-v{job.index_config_version}",
                 version=str(job.index_config_version),
                 storage_uri=embed_uri,
                 content_hash=None,
@@ -151,7 +151,7 @@ async def _register_ingestion_lineage(
             LineageArtifact(
                 id=str(uuid7()),
                 artifact_type=ArtifactType.INDEX_ARTIFACT.value,
-                name=f"{job.plan_name}-index-v{job.index_config_version}",
+                name=f"{job.project_name}-index-v{job.index_config_version}",
                 version=str(job.index_config_version),
                 storage_uri=index_uri,
                 content_hash=None,
@@ -199,16 +199,16 @@ async def _register_ingestion_lineage(
 
 async def create_ingestion_job(
     session: AsyncSession,
-    plan_name: str,
+    project_name: str,
     request: IngestRequest,
 ) -> IngestionJob:
     """Validate the index config exists, persist a QUEUED job, return it."""
-    ic = await _load_index_config(session, plan_name, request.index_config_version)
+    ic = await _load_index_config(session, project_name, request.index_config_version)
 
     now = datetime.now(UTC)
     job = IngestionJob(
         id=str(uuid7()),
-        plan_name=plan_name,
+        project_name=project_name,
         index_config_id=ic.id,
         index_config_version=request.index_config_version,
         source_uri=request.source_uri,
@@ -238,11 +238,11 @@ async def process_next_ingestion_job(session: AsyncSession) -> str | None:
         return None
 
     job_id = job.id
-    log.info("ingestion.job.started", extra={"job_id": job_id, "plan": job.plan_name})
+    log.info("ingestion.job.started", extra={"job_id": job_id, "project": job.project_name})
 
     try:
         # 1. Load index config
-        ic = await _load_index_config(session, job.plan_name, job.index_config_version)
+        ic = await _load_index_config(session, job.project_name, job.index_config_version)
 
         # 2. Load documents
         if job.source_uri:
@@ -268,7 +268,7 @@ async def process_next_ingestion_job(session: AsyncSession) -> str | None:
                         "payload": {
                             "doc_id": doc_id,
                             "chunk_idx": idx,
-                            "plan_name": job.plan_name,
+                            "project_name": job.project_name,
                             "index_config_version": job.index_config_version,
                             **metadata,
                         },
@@ -327,7 +327,7 @@ async def process_next_ingestion_job(session: AsyncSession) -> str | None:
                 WebhookEvent.PLAN_VERSION_CREATED,
                 {
                     "job_id": job_id,
-                    "plan_name": job.plan_name,
+                    "project_name": job.project_name,
                     "index_config_version": job.index_config_version,
                     "indexed_chunks": indexed_chunks,
                     "failed_chunks": failed_chunks,
@@ -349,7 +349,7 @@ async def process_next_ingestion_job(session: AsyncSession) -> str | None:
             "ingestion.job.completed",
             extra={
                 "job_id": job_id,
-                "plan": job.plan_name,
+                "project": job.project_name,
                 "total_docs": total_docs,
                 "indexed_chunks": indexed_chunks,
                 "failed_chunks": failed_chunks,

@@ -21,10 +21,10 @@ async def queue_eval_job(
     request: QueueEvalJobRequest,
     db: AsyncSession = Depends(get_db),
 ) -> EvalJobResponse:
-    """Queue a new evaluation job for a plan version.
+    """Queue a new evaluation job for a project index config version.
 
-    The job will be picked up by the background eval_job_runner. The plan
-    version must exist. The dataset must be a JSONL file at the given S3 URI.
+    The job will be picked up by the background eval_job_runner. The project
+    index config version must exist. The dataset must be a JSONL file at the given S3 URI.
     """
     return await service.queue_eval_job(db, request)
 
@@ -40,24 +40,24 @@ async def get_eval_job(
 
 @router.get("/jobs", response_model=EvalJobListResponse)
 async def list_eval_jobs(
-    plan_name: str | None = Query(None, description="Filter by plan name"),
+    project_name: str | None = Query(None, description="Filter by project name"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ) -> EvalJobListResponse:
-    """List eval jobs, newest first. Optionally filter by plan name."""
-    return await service.list_eval_jobs(db, plan_name=plan_name, limit=limit, offset=offset)
+    """List eval jobs, newest first. Optionally filter by project name."""
+    return await service.list_eval_jobs(db, project_name=project_name, limit=limit, offset=offset)
 
 
 @router.get(
-    "/plans/{plan_name}/jobs",
+    "/projects/{project_name}/jobs",
     response_model=EvalJobListResponse,
 )
-async def list_plan_eval_jobs(
-    plan_name: str,
+async def list_project_eval_jobs(
+    project_name: str,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ) -> EvalJobListResponse:
-    """List eval jobs for a specific plan, newest first."""
-    return await service.list_eval_jobs(db, plan_name=plan_name, limit=limit, offset=offset)
+    """List eval jobs for a specific project, newest first."""
+    return await service.list_eval_jobs(db, project_name=project_name, limit=limit, offset=offset)

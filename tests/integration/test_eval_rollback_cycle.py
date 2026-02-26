@@ -34,15 +34,15 @@ from retrieval_os.webhooks.events import WebhookEvent
 def _make_eval_job(
     *,
     job_id: str = "eval-001",
-    plan_name: str = "my-docs",
-    plan_version: int = 1,
+    project_name: str = "my-docs",
+    index_config_version: int = 1,
     dataset_uri: str = "s3://bucket/gt.jsonl",
     top_k: int = 5,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         id=job_id,
-        plan_name=plan_name,
-        plan_version=plan_version,
+        project_name=project_name,
+        index_config_version=index_config_version,
         dataset_uri=dataset_uri,
         top_k=top_k,
         status="RUNNING",
@@ -89,7 +89,7 @@ def _make_prev_job(*, recall_at_5: float = 0.80) -> SimpleNamespace:
 def _make_deployment(
     *,
     dep_id: str = "dep-001",
-    plan_name: str = "my-docs",
+    project_name: str = "my-docs",
     recall_threshold: float | None = None,
     error_threshold: float | None = None,
 ) -> Deployment:
@@ -98,7 +98,7 @@ def _make_deployment(
     now = datetime.now(UTC)
     return Deployment(
         id=dep_id,
-        plan_name=plan_name,
+        project_name=project_name,
         index_config_version=1,
         status=DeploymentStatus.ACTIVE.value,
         traffic_weight=1.0,
@@ -149,7 +149,7 @@ class TestEvalRegressionDetection:
                 new=AsyncMock(return_value=_make_eval_results(recall_at_5=0.80)),
             ),
             patch(
-                "retrieval_os.evaluations.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.evaluations.service.eval_repo.get_latest_completed_for_project",
                 new=AsyncMock(return_value=None),  # no previous eval
             ),
             patch(
@@ -203,7 +203,7 @@ class TestEvalRegressionDetection:
                 ),
             ),
             patch(
-                "retrieval_os.evaluations.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.evaluations.service.eval_repo.get_latest_completed_for_project",
                 new=AsyncMock(return_value=prev),
             ),
             patch(
@@ -253,7 +253,7 @@ class TestEvalRegressionDetection:
                 new=AsyncMock(return_value=_make_eval_results(recall_at_5=0.85)),
             ),
             patch(
-                "retrieval_os.evaluations.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.evaluations.service.eval_repo.get_latest_completed_for_project",
                 new=AsyncMock(return_value=prev),
             ),
             patch(
@@ -323,11 +323,11 @@ class TestEvalWatchdogCycle:
         The two service functions share the same mocked eval_repo, simulating
         the state that would exist after the eval runner writes its result.
         """
-        dep = _make_deployment(plan_name="my-docs", recall_threshold=0.75)
+        dep = _make_deployment(project_name="my-docs", recall_threshold=0.75)
         low_recall_eval = SimpleNamespace(
             id="eval-001",
-            plan_name="my-docs",
-            plan_version=1,
+            project_name="my-docs",
+            index_config_version=1,
             recall_at_5=0.50,  # below threshold
             total_queries=100,
             failed_queries=0,
@@ -341,7 +341,7 @@ class TestEvalWatchdogCycle:
                 new=AsyncMock(return_value=[dep]),
             ),
             patch(
-                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_project",
                 new=AsyncMock(return_value=low_recall_eval),
             ),
             patch(
@@ -362,7 +362,7 @@ class TestEvalWatchdogCycle:
     @pytest.mark.asyncio
     async def test_high_recall_eval_no_watchdog_rollback(self) -> None:
         """When the latest eval passes all thresholds, the watchdog takes no action."""
-        dep = _make_deployment(plan_name="my-docs", recall_threshold=0.70)
+        dep = _make_deployment(project_name="my-docs", recall_threshold=0.70)
         good_eval = SimpleNamespace(
             recall_at_5=0.85,
             total_queries=100,
@@ -376,7 +376,7 @@ class TestEvalWatchdogCycle:
                 new=AsyncMock(return_value=[dep]),
             ),
             patch(
-                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_project",
                 new=AsyncMock(return_value=good_eval),
             ),
         ):
@@ -387,7 +387,7 @@ class TestEvalWatchdogCycle:
     @pytest.mark.asyncio
     async def test_error_rate_from_eval_triggers_watchdog(self) -> None:
         """Eval that produces a high error rate triggers watchdog via error_threshold."""
-        dep = _make_deployment(plan_name="my-docs", error_threshold=0.05)
+        dep = _make_deployment(project_name="my-docs", error_threshold=0.05)
         high_error_eval = SimpleNamespace(
             recall_at_5=0.90,  # recall fine
             total_queries=100,
@@ -402,7 +402,7 @@ class TestEvalWatchdogCycle:
                 new=AsyncMock(return_value=[dep]),
             ),
             patch(
-                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_project",
                 new=AsyncMock(return_value=high_error_eval),
             ),
             patch(
@@ -433,15 +433,15 @@ class TestEvalWatchdogCycle:
         # State shared between eval runner and watchdog (via mocked repo)
         completed_eval = SimpleNamespace(
             id="eval-001",
-            plan_name="my-docs",
-            plan_version=1,
+            project_name="my-docs",
+            index_config_version=1,
             recall_at_5=low_recall,
             total_queries=50,
             failed_queries=0,
         )
 
-        dep = _make_deployment(plan_name="my-docs", recall_threshold=threshold)
-        job = _make_eval_job(plan_name="my-docs")
+        dep = _make_deployment(project_name="my-docs", recall_threshold=threshold)
+        job = _make_eval_job(project_name="my-docs")
         session = MagicMock()
 
         complete_mock = AsyncMock()
@@ -466,7 +466,7 @@ class TestEvalWatchdogCycle:
                 new=AsyncMock(return_value=_make_eval_results(recall_at_5=low_recall)),
             ),
             patch(
-                "retrieval_os.evaluations.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.evaluations.service.eval_repo.get_latest_completed_for_project",
                 new=AsyncMock(return_value=_make_prev_job(recall_at_5=0.85)),
             ),
             patch(
@@ -488,7 +488,7 @@ class TestEvalWatchdogCycle:
                 new=AsyncMock(return_value=[dep]),
             ),
             patch(
-                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_project",
                 new=AsyncMock(return_value=completed_eval),
             ),
             patch(

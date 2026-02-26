@@ -4,7 +4,7 @@ Two test classes:
 
 - TestQueryEndpoint      — exercises the full HTTP stack via AsyncClient,
                            patching ``route_query`` at the serving_router import site.
-- TestQueryRouterConfig  — calls ``_load_plan_config()`` directly, patching
+- TestQueryRouterConfig  — calls ``_load_project_config()`` directly, patching
                            Redis and the repo singletons in query_router.
 
 Value over unit tests
@@ -25,7 +25,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from retrieval_os.core.exceptions import ProjectNotFoundError
-from retrieval_os.serving.query_router import _load_plan_config, _plan_redis_key
+from retrieval_os.serving.query_router import _load_project_config, _project_redis_key
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -39,9 +39,9 @@ def _make_chunk() -> SimpleNamespace:
     )
 
 
-def _make_query_info(*, plan_name: str = "my-docs", cache_hit: bool = False) -> dict:
+def _make_query_info(*, project_name: str = "my-docs", cache_hit: bool = False) -> dict:
     return {
-        "plan_name": plan_name,
+        "project_name": project_name,
         "version": 1,
         "cache_hit": cache_hit,
         "result_count": 1,
@@ -67,7 +67,7 @@ class TestQueryEndpoint:
             resp = await client.post("/v1/query/my-docs", json={"query": "what is RAG?"})
         assert resp.status_code == 200
         body = resp.json()
-        assert body["plan_name"] == "my-docs"
+        assert body["project_name"] == "my-docs"
         assert body["version"] == 1
         assert body["cache_hit"] is False
         assert body["result_count"] == 1
@@ -137,10 +137,10 @@ class TestQueryEndpoint:
 
 class TestQueryRouterConfig:
     def test_redis_key_format(self) -> None:
-        assert _plan_redis_key("my-docs") == "ros:project:my-docs:active"
+        assert _project_redis_key("my-docs") == "ros:project:my-docs:active"
 
     @pytest.mark.asyncio
-    async def test_load_plan_config_redis_hit_skips_postgres(self) -> None:
+    async def test_load_project_config_redis_hit_skips_postgres(self) -> None:
         """When Redis returns a cached blob, no Postgres calls are made."""
         config_blob = {
             "project_name": "my-docs",
@@ -172,14 +172,14 @@ class TestQueryRouterConfig:
             patch("retrieval_os.serving.query_router.project_repo", mock_project_repo),
         ):
             mock_db = AsyncMock()
-            result = await _load_plan_config("my-docs", mock_db)
+            result = await _load_project_config("my-docs", mock_db)
 
         assert result == config_blob
         mock_redis.get.assert_called_once_with("ros:project:my-docs:active")
         mock_project_repo.get_by_name.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_load_plan_config_redis_miss_falls_back_and_warms_cache(self) -> None:
+    async def test_load_project_config_redis_miss_falls_back_and_warms_cache(self) -> None:
         """On a Redis miss, config is loaded from Postgres and the cache is warmed."""
         fake_project = SimpleNamespace(name="my-docs", is_archived=False)
         fake_config_id = "018e7a2b-4000-7000-b234-000000000001"
@@ -213,7 +213,7 @@ class TestQueryRouterConfig:
         mock_project_repo.get_index_config_by_id = AsyncMock(return_value=fake_index_config)
 
         mock_deployment_repo = MagicMock()
-        mock_deployment_repo.get_active_for_plan = AsyncMock(return_value=fake_deployment)
+        mock_deployment_repo.get_active_for_project = AsyncMock(return_value=fake_deployment)
 
         with (
             patch(
@@ -224,7 +224,7 @@ class TestQueryRouterConfig:
             patch("retrieval_os.serving.query_router.deployment_repo", mock_deployment_repo),
         ):
             mock_db = AsyncMock()
-            result = await _load_plan_config("my-docs", mock_db)
+            result = await _load_project_config("my-docs", mock_db)
 
         expected_keys = {
             "project_name",
@@ -249,7 +249,7 @@ class TestQueryRouterConfig:
         assert mock_redis.set.call_args.args[0] == "ros:project:my-docs:active"
 
     @pytest.mark.asyncio
-    async def test_load_plan_config_merged_config_carries_deployment_search_fields(
+    async def test_load_project_config_merged_config_carries_deployment_search_fields(
         self,
     ) -> None:
         """Deployment search config fields AND IndexConfig embed fields both appear in the merged blob."""
@@ -285,7 +285,7 @@ class TestQueryRouterConfig:
         mock_project_repo.get_index_config_by_id = AsyncMock(return_value=fake_index_config)
 
         mock_deployment_repo = MagicMock()
-        mock_deployment_repo.get_active_for_plan = AsyncMock(return_value=fake_deployment)
+        mock_deployment_repo.get_active_for_project = AsyncMock(return_value=fake_deployment)
 
         with (
             patch(
@@ -296,7 +296,7 @@ class TestQueryRouterConfig:
             patch("retrieval_os.serving.query_router.deployment_repo", mock_deployment_repo),
         ):
             mock_db = AsyncMock()
-            result = await _load_plan_config("my-docs", mock_db)
+            result = await _load_project_config("my-docs", mock_db)
 
         # Deployment search fields
         assert result["top_k"] == 25
@@ -308,7 +308,7 @@ class TestQueryRouterConfig:
         assert result["index_collection"] == "my_v2"
 
     @pytest.mark.asyncio
-    async def test_load_plan_config_project_not_found_raises(self) -> None:
+    async def test_load_project_config_project_not_found_raises(self) -> None:
         """ProjectNotFoundError is raised when the project row is missing."""
         mock_redis = AsyncMock()
         mock_redis.get = AsyncMock(return_value=None)
@@ -325,4 +325,4 @@ class TestQueryRouterConfig:
         ):
             mock_db = AsyncMock()
             with pytest.raises(ProjectNotFoundError):
-                await _load_plan_config("ghost-project", mock_db)
+                await _load_project_config("ghost-project", mock_db)

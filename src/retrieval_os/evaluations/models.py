@@ -1,7 +1,7 @@
 """SQLAlchemy ORM model for the Evaluation Engine domain.
 
-An EvalJob represents a batch evaluation run against a specific plan version.
-The runner embeds each query in the dataset, searches the plan's index,
+An EvalJob represents a batch evaluation run against a specific project index config version.
+The runner embeds each query in the dataset, searches the project's index,
 and computes Recall@k, MRR, and NDCG@k against ground-truth relevant IDs.
 """
 
@@ -27,7 +27,7 @@ class EvalJobStatus(StrEnum):
 
 
 class EvalJob(Base):
-    """A batch evaluation job for a specific plan version.
+    """A batch evaluation job for a specific project index config version.
 
     Lifecycle: QUEUED → RUNNING → COMPLETED | FAILED
 
@@ -43,8 +43,8 @@ class EvalJob(Base):
     id: Mapped[str] = mapped_column(
         PG_UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid7())
     )
-    plan_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    plan_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    project_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    index_config_version: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=EvalJobStatus.QUEUED, index=True
     )
@@ -68,7 +68,7 @@ class EvalJob(Base):
     failed_queries: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Regression vs previous completed job for the same plan
+    # Regression vs previous completed job for the same project
     regression_detected: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # [{metric, prev_value, curr_value, drop_pct}, ...]
     regression_detail: Mapped[list | None] = mapped_column(JSONB, nullable=True)

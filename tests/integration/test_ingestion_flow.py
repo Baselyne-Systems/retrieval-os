@@ -30,7 +30,7 @@ from retrieval_os.ingestion.service import process_next_ingestion_job
 def _make_job(
     *,
     job_id: str = "job-001",
-    plan_name: str = "my-docs",
+    project_name: str = "my-docs",
     index_config_version: int = 1,
     chunk_size: int = 512,
     overlap: int = 64,
@@ -43,7 +43,7 @@ def _make_job(
         ]
     return SimpleNamespace(
         id=job_id,
-        plan_name=plan_name,
+        project_name=project_name,
         index_config_version=index_config_version,
         chunk_size=chunk_size,
         overlap=overlap,
@@ -54,7 +54,7 @@ def _make_job(
     )
 
 
-def _make_plan_version(
+def _make_index_config_ns(
     *,
     embedding_provider: str = "sentence_transformers",
     embedding_model: str = "BAAI/bge-m3",
@@ -65,8 +65,8 @@ def _make_plan_version(
     embedding_normalize: bool = True,
 ) -> SimpleNamespace:
     return SimpleNamespace(
-        id="pv-001",
-        plan_id="plan-001",
+        id="ic-001",
+        project_id="project-001",
         version=1,
         embedding_provider=embedding_provider,
         embedding_model=embedding_model,
@@ -119,7 +119,7 @@ class TestProcessIngestionJob:
         job = _make_job(
             documents=[{"id": "doc-1", "content": content, "metadata": {"src": "test"}}]
         )
-        pv = _make_plan_version()
+        pv = _make_index_config_ns()
         fake_vectors = [[0.1] * 768]
         upsert_mock = AsyncMock()
         complete_mock = AsyncMock()
@@ -176,7 +176,7 @@ class TestProcessIngestionJob:
             overlap=64,
             documents=[{"id": "doc-1", "content": content, "metadata": {}}],
         )
-        pv = _make_plan_version()
+        pv = _make_index_config_ns()
         ensure_mock = AsyncMock(return_value=True)
         complete_mock = AsyncMock()
 
@@ -227,7 +227,7 @@ class TestProcessIngestionJob:
         """If embed_text raises, the batch's chunks go to failed_chunks.
         The job itself still reaches COMPLETED (per-batch error isolation)."""
         job = _make_job(documents=[{"id": "doc-1", "content": "word " * 20, "metadata": {}}])
-        pv = _make_plan_version()
+        pv = _make_index_config_ns()
         complete_mock = AsyncMock()
 
         with (
@@ -269,7 +269,7 @@ class TestProcessIngestionJob:
         job = _make_job(
             documents=[{"id": "doc-1", "content": "test content " * 10, "metadata": {}}]
         )
-        pv = _make_plan_version(index_collection="custom_collection")
+        pv = _make_index_config_ns(index_collection="custom_collection")
         upsert_mock = AsyncMock()
         complete_mock = AsyncMock()
 

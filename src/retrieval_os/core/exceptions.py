@@ -27,16 +27,8 @@ class ProjectNotFoundError(NotFoundError):
     error_code = "PROJECT_NOT_FOUND"
 
 
-# Backward-compat alias kept for any external callers
-PlanNotFoundError = ProjectNotFoundError
-
-
 class IndexConfigNotFoundError(NotFoundError):
     error_code = "INDEX_CONFIG_NOT_FOUND"
-
-
-# Backward-compat alias
-PlanVersionNotFoundError = IndexConfigNotFoundError
 
 
 class DeploymentNotFoundError(NotFoundError):

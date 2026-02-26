@@ -23,41 +23,41 @@ from retrieval_os.serving.index_proxy import IndexHit, vector_search
 
 log = logging.getLogger(__name__)
 
-_PLAN_CACHE_TTL = 30  # seconds; background loop refreshes this every 5 s
+_PROJECT_CACHE_TTL = 30  # seconds; background loop refreshes this every 5 s
 
 
-def _plan_redis_key(name: str) -> str:
+def _project_redis_key(name: str) -> str:
     return f"ros:project:{name}:active"
 
 
-async def _load_plan_config(plan_name: str, db: AsyncSession) -> dict:
+async def _load_project_config(project_name: str, db: AsyncSession) -> dict:
     """Return serving config dict; check Redis first, fall back to Postgres."""
     redis = await get_redis()
-    key = _plan_redis_key(plan_name)
+    key = _project_redis_key(project_name)
 
     raw = await redis.get(key)
     if raw:
         return json.loads(raw)
 
     # Cache miss — load from Postgres and warm Redis.
-    project = await project_repo.get_by_name(db, plan_name)
+    project = await project_repo.get_by_name(db, project_name)
     if not project:
-        raise ProjectNotFoundError(f"Project '{plan_name}' not found")
+        raise ProjectNotFoundError(f"Project '{project_name}' not found")
     if project.is_archived:
-        raise ProjectNotFoundError(f"Project '{plan_name}' is archived")
+        raise ProjectNotFoundError(f"Project '{project_name}' is archived")
 
     # Load the active deployment
-    deployment = await deployment_repo.get_active_for_plan(db, plan_name)
+    deployment = await deployment_repo.get_active_for_project(db, project_name)
     if not deployment:
-        raise ProjectNotFoundError(f"Project '{plan_name}' has no active deployment")
+        raise ProjectNotFoundError(f"Project '{project_name}' has no active deployment")
 
     # Load the index config
     index_config = await project_repo.get_index_config_by_id(db, deployment.index_config_id)
     if not index_config:
-        raise ProjectNotFoundError(f"Project '{plan_name}' index config not found")
+        raise ProjectNotFoundError(f"Project '{project_name}' index config not found")
 
     config = {
-        "project_name": plan_name,
+        "project_name": project_name,
         "index_config_version": deployment.index_config_version,
         "embedding_provider": index_config.embedding_provider,
         "embedding_model": index_config.embedding_model,
@@ -76,16 +76,16 @@ async def _load_plan_config(plan_name: str, db: AsyncSession) -> dict:
     }
 
     try:
-        await redis.set(key, json.dumps(config, default=str), ex=_PLAN_CACHE_TTL)
+        await redis.set(key, json.dumps(config, default=str), ex=_PROJECT_CACHE_TTL)
     except Exception:
-        log.warning("query_router.redis_warm_failed", extra={"plan": plan_name})
+        log.warning("query_router.redis_warm_failed", extra={"project": project_name})
 
     return config
 
 
 async def route_query(
     *,
-    plan_name: str,
+    project_name: str,
     query: str,
     db: AsyncSession,
     metadata_filter_override: dict | None = None,
@@ -93,7 +93,7 @@ async def route_query(
     """Resolve project config and execute retrieval.
 
     Args:
-        plan_name:               Name of the project.
+        project_name:            Name of the project.
         query:                   The natural-language query string.
         db:                      AsyncSession — only used on Redis miss.
         metadata_filter_override: Request-level filter merged over deployment filters.
@@ -101,7 +101,7 @@ async def route_query(
     Returns:
         (chunks, info_dict) where info_dict carries version, cache_hit, etc.
     """
-    config = await _load_plan_config(plan_name, db)
+    config = await _load_project_config(project_name, db)
 
     # Merge metadata filters: request-level overrides deployment-level.
     filters = config.get("metadata_filters") or {}
@@ -109,7 +109,7 @@ async def route_query(
         filters = {**filters, **metadata_filter_override}
 
     chunks, cache_hit = await execute_retrieval(
-        plan_name=plan_name,
+        project_name=project_name,
         version=config["index_config_version"],
         query=query,
         embedding_provider=config["embedding_provider"],
@@ -129,7 +129,7 @@ async def route_query(
     )
 
     info = {
-        "plan_name": plan_name,
+        "project_name": project_name,
         "version": config["index_config_version"],
         "cache_hit": cache_hit,
         "result_count": len(chunks),
@@ -142,12 +142,12 @@ async def route_query(
 
 async def route_image_query(
     *,
-    plan_name: str,
+    project_name: str,
     image_bytes: bytes,
     db: AsyncSession,
 ) -> tuple[list[RetrievedChunk], dict]:
     """Embed an image with CLIP and search the project's vector index."""
-    config = await _load_plan_config(plan_name, db)
+    config = await _load_project_config(project_name, db)
 
     hits: list[IndexHit] = await _embed_and_search(
         vectors=await embed_images(
@@ -160,7 +160,7 @@ async def route_image_query(
 
     chunks = _hits_to_chunks(hits)
     return chunks, {
-        "plan_name": plan_name,
+        "project_name": project_name,
         "version": config["index_config_version"],
         "cache_hit": False,
         "result_count": len(chunks),
@@ -169,13 +169,13 @@ async def route_image_query(
 
 async def route_audio_query(
     *,
-    plan_name: str,
+    project_name: str,
     audio_bytes: bytes,
     db: AsyncSession,
     whisper_model_size: str = "base",
 ) -> tuple[list[RetrievedChunk], dict]:
     """Transcribe audio with Whisper, embed the transcript, and search."""
-    config = await _load_plan_config(plan_name, db)
+    config = await _load_project_config(project_name, db)
 
     hits = await _embed_and_search(
         vectors=await embed_audio(
@@ -189,7 +189,7 @@ async def route_audio_query(
 
     chunks = _hits_to_chunks(hits)
     return chunks, {
-        "plan_name": plan_name,
+        "project_name": project_name,
         "version": config["index_config_version"],
         "cache_hit": False,
         "result_count": len(chunks),

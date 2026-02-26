@@ -118,8 +118,8 @@ async def load_eval_dataset(dataset_uri: str) -> list[EvalRecord]:
 async def execute_eval_job(
     records: list[EvalRecord],
     *,
-    plan_name: str,
-    plan_version: int,
+    project_name: str,
+    index_config_version: int,
     embedding_provider: str,
     embedding_model: str,
     embedding_normalize: bool,
@@ -145,8 +145,8 @@ async def execute_eval_job(
     for record in records:
         try:
             chunks, _ = await execute_retrieval(
-                plan_name=plan_name,
-                version=plan_version,
+                project_name=project_name,
+                version=index_config_version,
                 query=record.query,
                 embedding_provider=embedding_provider,
                 embedding_model=embedding_model,
@@ -166,7 +166,7 @@ async def execute_eval_job(
         except Exception:
             log.exception(
                 "eval.query_failed",
-                extra={"plan_name": plan_name, "query": record.query[:80]},
+                extra={"project_name": project_name, "query": record.query[:80]},
             )
             failed += 1
             retrieved_ids = []

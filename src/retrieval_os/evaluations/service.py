@@ -29,19 +29,19 @@ _REGRESSION_THRESHOLD = 0.05
 _REGRESSION_METRICS = ("recall_at_5", "mrr", "ndcg_at_5")
 
 
-async def _load_index_config(session: AsyncSession, plan_name: str, version: int) -> IndexConfig:
-    """Load an IndexConfig by (plan_name, version_number)."""
+async def _load_index_config(session: AsyncSession, project_name: str, version: int) -> IndexConfig:
+    """Load an IndexConfig by (project_name, version_number)."""
     result = await session.execute(
         select(IndexConfig)
         .join(Project, IndexConfig.project_id == Project.id)
-        .where(Project.name == plan_name, IndexConfig.version == version)
+        .where(Project.name == project_name, IndexConfig.version == version)
     )
     ic = result.scalar_one_or_none()
     if ic is None:
         from retrieval_os.core.exceptions import IndexConfigNotFoundError
 
         raise IndexConfigNotFoundError(
-            f"Project '{plan_name}' index config version {version} not found"
+            f"Project '{project_name}' index config version {version} not found"
         )
     return ic
 
@@ -51,13 +51,13 @@ async def queue_eval_job(
     request,  # QueueEvalJobRequest
 ) -> EvalJobResponse:
     """Create a new QUEUED eval job."""
-    # Verify the plan version exists before queuing
-    await _load_index_config(session, request.plan_name, request.plan_version)
+    # Verify the project index config version exists before queuing
+    await _load_index_config(session, request.project_name, request.index_config_version)
 
     job = EvalJob(
         id=str(uuid7()),
-        plan_name=request.plan_name,
-        plan_version=request.plan_version,
+        project_name=request.project_name,
+        index_config_version=request.index_config_version,
         status=EvalJobStatus.QUEUED,
         dataset_uri=request.dataset_uri,
         top_k=request.top_k,
@@ -77,12 +77,12 @@ async def get_eval_job(session: AsyncSession, job_id: str) -> EvalJobResponse:
 
 async def list_eval_jobs(
     session: AsyncSession,
-    plan_name: str | None = None,
+    project_name: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> EvalJobListResponse:
     jobs, total = await eval_repo.list_jobs(
-        session, plan_name=plan_name, limit=limit, offset=offset
+        session, project_name=project_name, limit=limit, offset=offset
     )
     return EvalJobListResponse(
         items=[EvalJobResponse.model_validate(j) for j in jobs],
@@ -104,11 +104,11 @@ async def process_next_eval_job(session: AsyncSession) -> str | None:
 
     job_id = job.id
     start = datetime.now(UTC)
-    log.info("eval.job.started", extra={"job_id": job_id, "plan": job.plan_name})
+    log.info("eval.job.started", extra={"job_id": job_id, "project": job.project_name})
 
     try:
         # Load index config (new nested session not needed — same tx is fine for reads)
-        ic = await _load_index_config(session, job.plan_name, job.plan_version)
+        ic = await _load_index_config(session, job.project_name, job.index_config_version)
 
         # Load dataset from S3
         records = await load_eval_dataset(job.dataset_uri)
@@ -126,8 +126,8 @@ async def process_next_eval_job(session: AsyncSession) -> str | None:
         # reranker/rerank_top_k live on Deployment (search config); eval tests raw retrieval
         results: EvalResults = await execute_eval_job(
             records,
-            plan_name=job.plan_name,
-            plan_version=job.plan_version,
+            project_name=job.project_name,
+            index_config_version=job.index_config_version,
             embedding_provider=ic.embedding_provider,
             embedding_model=ic.embedding_model,
             embedding_normalize=ic.embedding_normalize,
@@ -141,8 +141,8 @@ async def process_next_eval_job(session: AsyncSession) -> str | None:
         )
 
         # Regression detection against previous completed job
-        previous = await eval_repo.get_latest_completed_for_plan(
-            session, job.plan_name, exclude_job_id=job_id
+        previous = await eval_repo.get_latest_completed_for_project(
+            session, job.project_name, exclude_job_id=job_id
         )
         regressions: list[dict] = []
         if previous is not None:
@@ -162,7 +162,7 @@ async def process_next_eval_job(session: AsyncSession) -> str | None:
             if regressions:
                 for r in regressions:
                     metrics.eval_regression_alerts_total.labels(
-                        plan_name=job.plan_name,
+                        project_name=job.project_name,
                         metric_name=r["metric"],
                         severity="warning",
                     ).inc()
@@ -174,8 +174,8 @@ async def process_next_eval_job(session: AsyncSession) -> str | None:
                 WebhookEvent.EVAL_REGRESSION_DETECTED,
                 {
                     "job_id": job_id,
-                    "plan_name": job.plan_name,
-                    "plan_version": job.plan_version,
+                    "project_name": job.project_name,
+                    "index_config_version": job.index_config_version,
                     "regressions": regressions,
                 },
                 session,
@@ -198,23 +198,25 @@ async def process_next_eval_job(session: AsyncSession) -> str | None:
         )
 
         # Prometheus gauges
-        dep_id = f"{job.plan_name}-v{job.plan_version}"
-        metrics.eval_recall_at_k.labels(plan_name=job.plan_name, deployment_id=dep_id, k="5").set(
-            results.recall_at_5
+        dep_id = f"{job.project_name}-v{job.index_config_version}"
+        metrics.eval_recall_at_k.labels(
+            project_name=job.project_name, deployment_id=dep_id, k="5"
+        ).set(results.recall_at_5)
+        metrics.eval_mrr.labels(project_name=job.project_name, deployment_id=dep_id).set(
+            results.mrr
         )
-        metrics.eval_mrr.labels(plan_name=job.plan_name, deployment_id=dep_id).set(results.mrr)
-        metrics.eval_ndcg_at_k.labels(plan_name=job.plan_name, deployment_id=dep_id, k="5").set(
-            results.ndcg_at_5
-        )
+        metrics.eval_ndcg_at_k.labels(
+            project_name=job.project_name, deployment_id=dep_id, k="5"
+        ).set(results.ndcg_at_5)
 
         elapsed = (datetime.now(UTC) - start).total_seconds()
-        metrics.eval_job_duration_seconds.labels(plan_name=job.plan_name).observe(elapsed)
+        metrics.eval_job_duration_seconds.labels(project_name=job.project_name).observe(elapsed)
 
         log.info(
             "eval.job.completed",
             extra={
                 "job_id": job_id,
-                "plan": job.plan_name,
+                "project": job.project_name,
                 "recall_at_5": round(results.recall_at_5, 4),
                 "mrr": round(results.mrr, 4),
                 "regression": regression_detected,

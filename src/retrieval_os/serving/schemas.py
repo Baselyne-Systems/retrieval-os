@@ -21,7 +21,7 @@ class ChunkResponse(BaseModel):
 
 
 class QueryResponse(BaseModel):
-    plan_name: str
+    project_name: str
     version: int
     cache_hit: bool
     results: list[ChunkResponse]

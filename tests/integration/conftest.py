@@ -111,7 +111,7 @@ def make_project_response(
 
 def make_deployment_response(
     *,
-    plan_name: str = "my-docs",
+    project_name: str = "my-docs",
     index_config_version: int = 1,
     status: str = DeploymentStatus.ACTIVE.value,
     dep_id: str = "dep-001",
@@ -131,7 +131,7 @@ def make_deployment_response(
 ) -> DeploymentResponse:
     return DeploymentResponse(
         id=dep_id,
-        plan_name=plan_name,
+        project_name=project_name,
         project_id=uuid.UUID(_FAKE_PROJECT_ID),
         index_config_id=uuid.UUID(_FAKE_CONFIG_ID),
         index_config_version=index_config_version,
@@ -169,7 +169,7 @@ def make_eval_ns(
     """Lightweight eval-job-like namespace for watchdog / eval cycle tests."""
     return SimpleNamespace(
         id="eval-001",
-        plan_name="my-docs",
+        project_name="my-docs",
         index_config_version=1,
         recall_at_5=recall_at_5,
         total_queries=total_queries,

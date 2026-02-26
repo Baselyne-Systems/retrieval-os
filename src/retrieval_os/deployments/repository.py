@@ -19,11 +19,13 @@ class DeploymentRepository:
         result = await session.execute(select(Deployment).where(Deployment.id == deployment_id))
         return result.scalar_one_or_none()
 
-    async def get_active_for_plan(self, session: AsyncSession, plan_name: str) -> Deployment | None:
-        """Return the ACTIVE or ROLLING_OUT deployment for a plan, if any."""
+    async def get_active_for_project(
+        self, session: AsyncSession, project_name: str
+    ) -> Deployment | None:
+        """Return the ACTIVE or ROLLING_OUT deployment for a project, if any."""
         result = await session.execute(
             select(Deployment).where(
-                Deployment.plan_name == plan_name,
+                Deployment.project_name == project_name,
                 Deployment.status.in_(
                     [DeploymentStatus.ACTIVE.value, DeploymentStatus.ROLLING_OUT.value]
                 ),
@@ -31,12 +33,12 @@ class DeploymentRepository:
         )
         return result.scalar_one_or_none()
 
-    async def list_for_plan(
-        self, session: AsyncSession, plan_name: str, limit: int = 20
+    async def list_for_project(
+        self, session: AsyncSession, project_name: str, limit: int = 20
     ) -> list[Deployment]:
         result = await session.execute(
             select(Deployment)
-            .where(Deployment.plan_name == plan_name)
+            .where(Deployment.project_name == project_name)
             .order_by(Deployment.created_at.desc())
             .limit(limit)
         )
@@ -62,7 +64,7 @@ class DeploymentRepository:
         return list(result.scalars().all())
 
     async def list_live(self, session: AsyncSession) -> list[Deployment]:
-        """Return all ACTIVE and ROLLING_OUT deployments across every plan.
+        """Return all ACTIVE and ROLLING_OUT deployments across every project.
 
         Used by the rollback watchdog to check guard rails.
         """

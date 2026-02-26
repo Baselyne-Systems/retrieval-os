@@ -191,7 +191,7 @@ class TestDeploymentEndpoints:
         body = resp.json()
         assert body["status"] == "ACTIVE"
         assert body["traffic_weight"] == 1.0
-        assert body["plan_name"] == "my-docs"
+        assert body["project_name"] == "my-docs"
 
     @pytest.mark.asyncio
     async def test_create_deployment_project_not_found_returns_404(self, int_client) -> None:

@@ -21,29 +21,29 @@ from retrieval_os.ingestion.schemas import (
 )
 from retrieval_os.ingestion.service import create_ingestion_job
 
-router = APIRouter(prefix="/v1/projects/{plan_name}/ingest", tags=["ingestion"])
+router = APIRouter(prefix="/v1/projects/{project_name}/ingest", tags=["ingestion"])
 
 
 @router.post("", response_model=IngestionJobResponse, status_code=202)
 async def submit_ingestion_job(
-    plan_name: str,
+    project_name: str,
     request: IngestRequest,
     session: AsyncSession = Depends(get_db),
 ) -> IngestionJobResponse:
     """Submit a batch ingestion job. Returns immediately with job status QUEUED."""
-    job = await create_ingestion_job(session, plan_name, request)
+    job = await create_ingestion_job(session, project_name, request)
     return IngestionJobResponse.model_validate(job)
 
 
 @router.get("", response_model=IngestionJobListResponse)
 async def list_ingestion_jobs(
-    plan_name: str,
+    project_name: str,
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
     session: AsyncSession = Depends(get_db),
 ) -> IngestionJobListResponse:
-    items, total = await ingestion_repo.list_for_plan(
-        session, plan_name, offset=offset, limit=limit
+    items, total = await ingestion_repo.list_for_project(
+        session, project_name, offset=offset, limit=limit
     )
     return IngestionJobListResponse(
         items=[IngestionJobResponse.model_validate(i) for i in items],
@@ -53,14 +53,14 @@ async def list_ingestion_jobs(
 
 @router.get("/{job_id}", response_model=IngestionJobResponse)
 async def get_ingestion_job(
-    plan_name: str,
+    project_name: str,
     job_id: str,
     session: AsyncSession = Depends(get_db),
 ) -> IngestionJobResponse:
     job = await ingestion_repo.get(session, job_id)
-    if job is None or job.plan_name != plan_name:
+    if job is None or job.project_name != project_name:
         raise HTTPException(
             status_code=404,
-            detail=f"Ingestion job '{job_id}' not found for plan '{plan_name}'",
+            detail=f"Ingestion job '{job_id}' not found for project '{project_name}'",
         )
     return IngestionJobResponse.model_validate(job)

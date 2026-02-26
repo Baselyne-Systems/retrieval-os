@@ -135,7 +135,7 @@ class TestQuerySchemas:
 
     def test_query_response_fields(self) -> None:
         resp = QueryResponse(
-            plan_name="docs",
+            project_name="docs",
             version=2,
             cache_hit=False,
             results=[ChunkResponse(id="1", score=0.9, text="hi", metadata={})],

@@ -8,8 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class QueueEvalJobRequest(BaseModel):
-    plan_name: str = Field(..., min_length=1, max_length=255)
-    plan_version: int = Field(..., ge=1)
+    project_name: str = Field(..., min_length=1, max_length=255)
+    index_config_version: int = Field(..., ge=1)
     dataset_uri: str = Field(..., min_length=1, description="S3 URI of the JSONL eval dataset")
     top_k: int = Field(10, ge=1, le=100, description="Number of results to retrieve per query")
     created_by: str = Field(..., min_length=1, max_length=255)
@@ -19,8 +19,8 @@ class EvalJobResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    plan_name: str
-    plan_version: int
+    project_name: str
+    index_config_version: int
     status: str
     dataset_uri: str
     top_k: int

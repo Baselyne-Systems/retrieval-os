@@ -1,8 +1,8 @@
 """Semantic query cache backed by Redis.
 
-Cache key = SHA-256( plan_name | version_num | query_text | top_k )
+Cache key = SHA-256( project_name | version_num | query_text | top_k )
 Value      = JSON-serialised list[RetrievedChunk]
-TTL        = plan's cache_ttl_seconds (0 = disabled)
+TTL        = project's cache_ttl_seconds (0 = disabled)
 """
 
 from __future__ import annotations
@@ -18,15 +18,15 @@ log = logging.getLogger(__name__)
 _PREFIX = "ros:qcache:"
 
 
-def _cache_key(plan_name: str, version: int, query: str, top_k: int) -> str:
-    raw = f"{plan_name}|{version}|{query}|{top_k}"
+def _cache_key(project_name: str, version: int, query: str, top_k: int) -> str:
+    raw = f"{project_name}|{version}|{query}|{top_k}"
     digest = hashlib.sha256(raw.encode()).hexdigest()
     return f"{_PREFIX}{digest}"
 
 
-async def cache_get(plan_name: str, version: int, query: str, top_k: int) -> list[dict] | None:
+async def cache_get(project_name: str, version: int, query: str, top_k: int) -> list[dict] | None:
     """Return cached chunks or None on miss."""
-    key = _cache_key(plan_name, version, query, top_k)
+    key = _cache_key(project_name, version, query, top_k)
     redis = await get_redis()
     try:
         raw = await redis.get(key)
@@ -39,7 +39,7 @@ async def cache_get(plan_name: str, version: int, query: str, top_k: int) -> lis
 
 
 async def cache_set(
-    plan_name: str,
+    project_name: str,
     version: int,
     query: str,
     top_k: int,
@@ -49,7 +49,7 @@ async def cache_set(
     """Store chunks; skip if ttl_seconds == 0."""
     if ttl_seconds <= 0:
         return
-    key = _cache_key(plan_name, version, query, top_k)
+    key = _cache_key(project_name, version, query, top_k)
     redis = await get_redis()
     try:
         await redis.set(key, json.dumps(chunks, default=str), ex=ttl_seconds)
@@ -57,8 +57,8 @@ async def cache_set(
         log.warning("cache.set_error", extra={"key": key})
 
 
-async def cache_invalidate_plan(plan_name: str) -> int:
-    """Delete all cached entries for a plan (used on new deployment).
+async def cache_invalidate_project(project_name: str) -> int:
+    """Delete all cached entries for a project (used on new deployment).
 
     Returns the number of keys deleted.
     """

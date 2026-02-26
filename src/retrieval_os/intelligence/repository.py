@@ -69,8 +69,8 @@ class IntelligenceRepository:
         session: AsyncSession,
         *,
         id: str,
-        plan_name: str,
-        plan_version: int,
+        project_name: str,
+        index_config_version: int,
         window_start: datetime,
         window_end: datetime,
         provider: str,
@@ -84,8 +84,8 @@ class IntelligenceRepository:
         """Insert or update a cost entry for the given window."""
         stmt = pg_insert(CostEntry).values(
             id=id,
-            plan_name=plan_name,
-            plan_version=plan_version,
+            project_name=project_name,
+            index_config_version=index_config_version,
             window_start=window_start,
             window_end=window_end,
             provider=provider,
@@ -112,15 +112,15 @@ class IntelligenceRepository:
     async def list_entries(
         self,
         session: AsyncSession,
-        plan_name: str | None = None,
+        project_name: str | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
         limit: int = 200,
         offset: int = 0,
     ) -> tuple[list[CostEntry], int]:
         q = select(CostEntry)
-        if plan_name:
-            q = q.where(CostEntry.plan_name == plan_name)
+        if project_name:
+            q = q.where(CostEntry.project_name == project_name)
         if since:
             q = q.where(CostEntry.window_start >= since)
         if until:
@@ -137,23 +137,23 @@ class IntelligenceRepository:
         session: AsyncSession,
         since: datetime,
         until: datetime,
-        plan_name: str | None = None,
+        project_name: str | None = None,
     ) -> list[dict]:
-        """Return per-plan aggregated cost summary for the time window."""
+        """Return per-project aggregated cost summary for the time window."""
         q = (
             sa.select(
-                CostEntry.plan_name,
+                CostEntry.project_name,
                 sa.func.sum(CostEntry.total_queries).label("total_queries"),
                 sa.func.sum(CostEntry.cache_hits).label("cache_hits"),
                 sa.func.sum(CostEntry.token_count).label("token_count"),
                 sa.func.sum(CostEntry.estimated_cost_usd).label("estimated_cost_usd"),
             )
             .where(CostEntry.window_start >= since, CostEntry.window_start < until)
-            .group_by(CostEntry.plan_name)
+            .group_by(CostEntry.project_name)
             .order_by(sa.func.sum(CostEntry.estimated_cost_usd).desc())
         )
-        if plan_name:
-            q = q.where(CostEntry.plan_name == plan_name)
+        if project_name:
+            q = q.where(CostEntry.project_name == project_name)
 
         result = await session.execute(q)
         return [row._asdict() for row in result]

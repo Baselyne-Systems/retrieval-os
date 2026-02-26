@@ -8,7 +8,7 @@ from retrieval_os.plans.validators import (
     VALID_METRICS,
     VALID_PROVIDERS,
     compute_config_hash,
-    validate_plan_config,
+    validate_index_config,
 )
 
 
@@ -30,17 +30,17 @@ def _base_config(**overrides: object) -> dict:
     return cfg
 
 
-# ── validate_plan_config ───────────────────────────────────────────────────────
+# ── validate_index_config ─────────────────────────────────────────────────────
 
 
-class TestValidatePlanConfig:
+class TestValidateIndexConfig:
     def test_valid_config_passes(self) -> None:
-        validate_plan_config(_base_config())  # should not raise
+        validate_index_config(_base_config())  # should not raise
 
     # Provider
     def test_invalid_provider_raises(self) -> None:
         with pytest.raises(AppValidationError) as exc_info:
-            validate_plan_config(_base_config(embedding_provider="gpt99"))
+            validate_index_config(_base_config(embedding_provider="gpt99"))
         assert "embedding_provider" in exc_info.value.detail["errors"][0]
 
     @pytest.mark.parametrize("provider", sorted(VALID_PROVIDERS))
@@ -52,7 +52,7 @@ class TestValidatePlanConfig:
             "whisper": ["audio"],
             "video_frame": ["video"],
         }
-        validate_plan_config(
+        validate_index_config(
             _base_config(
                 embedding_provider=provider,
                 modalities=modality_map[provider],
@@ -62,58 +62,58 @@ class TestValidatePlanConfig:
     # Backend
     def test_invalid_backend_raises(self) -> None:
         with pytest.raises(AppValidationError) as exc_info:
-            validate_plan_config(_base_config(index_backend="pinecone"))
+            validate_index_config(_base_config(index_backend="pinecone"))
         assert "index_backend" in exc_info.value.detail["errors"][0]
 
     @pytest.mark.parametrize("backend", sorted(VALID_BACKENDS))
     def test_all_valid_backends_pass(self, backend: str) -> None:
-        validate_plan_config(_base_config(index_backend=backend))
+        validate_index_config(_base_config(index_backend=backend))
 
     # Distance metric
     def test_invalid_metric_raises(self) -> None:
         with pytest.raises(AppValidationError) as exc_info:
-            validate_plan_config(_base_config(distance_metric="manhattan"))
+            validate_index_config(_base_config(distance_metric="manhattan"))
         assert "distance_metric" in exc_info.value.detail["errors"][0]
 
     @pytest.mark.parametrize("metric", sorted(VALID_METRICS))
     def test_all_valid_metrics_pass(self, metric: str) -> None:
-        validate_plan_config(_base_config(distance_metric=metric))
+        validate_index_config(_base_config(distance_metric=metric))
 
     # Modalities
     def test_empty_modalities_raises(self) -> None:
         with pytest.raises(AppValidationError) as exc_info:
-            validate_plan_config(_base_config(modalities=[]))
+            validate_index_config(_base_config(modalities=[]))
         assert "modalities" in exc_info.value.detail["errors"][0]
 
     def test_unknown_modality_raises(self) -> None:
         with pytest.raises(AppValidationError) as exc_info:
-            validate_plan_config(_base_config(modalities=["text", "smell"]))
+            validate_index_config(_base_config(modalities=["text", "smell"]))
         assert "modalities" in exc_info.value.detail["errors"][0]
 
     def test_provider_modality_mismatch_raises(self) -> None:
         # openai only supports text; asking for image should fail
         with pytest.raises(AppValidationError) as exc_info:
-            validate_plan_config(_base_config(embedding_provider="openai", modalities=["image"]))
+            validate_index_config(_base_config(embedding_provider="openai", modalities=["image"]))
         errors = exc_info.value.detail["errors"]
         assert any("openai" in e for e in errors)
 
     def test_clip_supports_text_and_image(self) -> None:
-        validate_plan_config(_base_config(embedding_provider="clip", modalities=["text", "image"]))
+        validate_index_config(_base_config(embedding_provider="clip", modalities=["text", "image"]))
 
     # quantization
     def test_invalid_quantization_raises(self) -> None:
         with pytest.raises(AppValidationError) as exc_info:
-            validate_plan_config(_base_config(quantization="binary"))
+            validate_index_config(_base_config(quantization="binary"))
         assert "quantization" in exc_info.value.detail["errors"][0]
 
     def test_valid_quantizations_pass(self) -> None:
-        validate_plan_config(_base_config(quantization="scalar"))
-        validate_plan_config(_base_config(quantization="product"))
+        validate_index_config(_base_config(quantization="scalar"))
+        validate_index_config(_base_config(quantization="product"))
 
     # Multiple errors collected
     def test_multiple_errors_collected(self) -> None:
         with pytest.raises(AppValidationError) as exc_info:
-            validate_plan_config(
+            validate_index_config(
                 _base_config(
                     embedding_provider="bad",
                     index_backend="bad",

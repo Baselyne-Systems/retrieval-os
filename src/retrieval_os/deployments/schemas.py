@@ -40,7 +40,7 @@ class DeploymentResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    plan_name: str
+    project_name: str
     project_id: uuid.UUID
     index_config_id: uuid.UUID
     index_config_version: int

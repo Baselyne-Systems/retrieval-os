@@ -33,7 +33,7 @@ class TestIngestionJobModel:
         now = datetime.now(UTC)
         job = IngestionJob(
             id="j-001",
-            plan_name="acme",
+            project_name="acme",
             index_config_version=1,
             source_uri=None,
             document_payload=[{"id": "d1", "content": "hello", "metadata": {}}],
@@ -42,7 +42,7 @@ class TestIngestionJobModel:
             status=IngestionJobStatus.QUEUED.value,
             created_at=now,
         )
-        assert job.plan_name == "acme"
+        assert job.project_name == "acme"
         assert job.status == "QUEUED"
         assert job.document_payload is not None
 
@@ -50,7 +50,7 @@ class TestIngestionJobModel:
         now = datetime.now(UTC)
         job = IngestionJob(
             id="j-002",
-            plan_name="acme",
+            project_name="acme",
             index_config_version=2,
             source_uri="s3://bucket/key.jsonl",
             document_payload=None,
@@ -280,7 +280,7 @@ class TestProcessNextIngestionJob:
         now = datetime.now(UTC)
         fake_job = IngestionJob(
             id="j-001",
-            plan_name="acme",
+            project_name="acme",
             index_config_version=1,
             source_uri=None,
             document_payload=[{"id": "d1", "content": "word " * 10, "metadata": {}}],
@@ -341,7 +341,7 @@ class TestProcessNextIngestionJob:
         now = datetime.now(UTC)
         fake_job = IngestionJob(
             id="j-err",
-            plan_name="acme",
+            project_name="acme",
             index_config_version=1,
             source_uri=None,
             document_payload=[],

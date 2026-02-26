@@ -28,7 +28,7 @@ PROVIDER_MODALITIES: dict[str, set[str]] = {
 }
 
 
-def validate_plan_config(config: dict[str, Any]) -> None:
+def validate_index_config(config: dict[str, Any]) -> None:
     """
     Validates index config semantics. Raises AppValidationError with all
     failures collected rather than stopping at the first one.

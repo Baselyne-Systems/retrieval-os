@@ -23,13 +23,13 @@ class EvaluationRepository:
     async def list_jobs(
         self,
         session: AsyncSession,
-        plan_name: str | None = None,
+        project_name: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[EvalJob], int]:
         q = select(EvalJob)
-        if plan_name:
-            q = q.where(EvalJob.plan_name == plan_name)
+        if project_name:
+            q = q.where(EvalJob.project_name == project_name)
         q = q.order_by(EvalJob.created_at.desc())
 
         count_q = sa.select(sa.func.count()).select_from(q.subquery())
@@ -128,17 +128,17 @@ class EvaluationRepository:
             )
         )
 
-    async def get_latest_completed_for_plan(
+    async def get_latest_completed_for_project(
         self,
         session: AsyncSession,
-        plan_name: str,
+        project_name: str,
         exclude_job_id: str | None = None,
     ) -> EvalJob | None:
-        """Return the most recently completed job for a plan (for regression comparison)."""
+        """Return the most recently completed job for a project (for regression comparison)."""
         q = (
             select(EvalJob)
             .where(
-                EvalJob.plan_name == plan_name,
+                EvalJob.project_name == project_name,
                 EvalJob.status == EvalJobStatus.COMPLETED,
             )
             .order_by(EvalJob.completed_at.desc())

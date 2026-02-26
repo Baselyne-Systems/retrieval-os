@@ -36,7 +36,7 @@ class TestDeploymentIsLive:
     def _make(self, status: str) -> Deployment:
         now = datetime.now(UTC)
         return Deployment(
-            plan_name="docs",
+            project_name="docs",
             project_id=uuid.uuid4(),
             index_config_id=uuid.uuid4(),
             index_config_version=1,
@@ -136,7 +136,7 @@ class TestTrafficKeys:
 
         assert _active_key("my-plan") == "ros:deployment:my-plan:active"
 
-    def test_plan_config_key_format(self) -> None:
-        from retrieval_os.deployments.traffic import _plan_config_key
+    def test_project_config_key_format(self) -> None:
+        from retrieval_os.deployments.traffic import _project_config_key
 
-        assert _plan_config_key("my-plan") == "ros:project:my-plan:active"
+        assert _project_config_key("my-plan") == "ros:project:my-plan:active"

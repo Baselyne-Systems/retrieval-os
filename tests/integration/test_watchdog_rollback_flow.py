@@ -33,7 +33,7 @@ from retrieval_os.deployments.service import check_rollback_thresholds, step_rol
 def _dep(
     *,
     dep_id: str = "dep-001",
-    plan_name: str = "plan-a",
+    project_name: str = "plan-a",
     index_config_version: int = 1,
     status: str = DeploymentStatus.ACTIVE.value,
     recall_threshold: float | None = None,
@@ -44,7 +44,7 @@ def _dep(
     now = datetime.now(UTC)
     return Deployment(
         id=dep_id,
-        plan_name=plan_name,
+        project_name=project_name,
         index_config_version=index_config_version,
         status=status,
         traffic_weight=traffic_weight,
@@ -97,7 +97,7 @@ class TestWatchdogRolloutInteraction:
                 new=AsyncMock(return_value=[dep]),
             ),
             patch(
-                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_project",
                 new=AsyncMock(return_value=eval_job),
             ),
             patch(
@@ -199,11 +199,11 @@ class TestPartialRollback:
     async def test_only_breaching_deployment_rolled_back(self) -> None:
         """When two plans are live, only the one that breaches the threshold
         gets rolled back.  The other is left unchanged."""
-        dep_ok = _dep(dep_id="dep-ok", plan_name="plan-ok", recall_threshold=0.60)
-        dep_bad = _dep(dep_id="dep-bad", plan_name="plan-bad", recall_threshold=0.75)
+        dep_ok = _dep(dep_id="dep-ok", project_name="plan-ok", recall_threshold=0.60)
+        dep_bad = _dep(dep_id="dep-bad", project_name="plan-bad", recall_threshold=0.75)
 
-        def eval_for_plan(session, plan_name):  # noqa: ANN001
-            if plan_name == "plan-ok":
+        def eval_for_plan(session, project_name):  # noqa: ANN001
+            if project_name == "plan-ok":
                 return _eval(recall_at_5=0.80)  # above threshold
             return _eval(recall_at_5=0.50)  # below threshold
 
@@ -216,7 +216,7 @@ class TestPartialRollback:
                 new=AsyncMock(return_value=[dep_ok, dep_bad]),
             ),
             patch(
-                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_project",
                 new=AsyncMock(side_effect=eval_for_plan),
             ),
             patch(
@@ -235,7 +235,8 @@ class TestPartialRollback:
     @pytest.mark.asyncio
     async def test_all_breaching_deployments_rolled_back(self) -> None:
         deps = [
-            _dep(dep_id=f"dep-{i}", plan_name=f"plan-{i}", recall_threshold=0.75) for i in range(3)
+            _dep(dep_id=f"dep-{i}", project_name=f"plan-{i}", recall_threshold=0.75)
+            for i in range(3)
         ]
         eval_job = _eval(recall_at_5=0.40)  # all breach
         rollback_mock = AsyncMock()
@@ -247,7 +248,7 @@ class TestPartialRollback:
                 new=AsyncMock(return_value=deps),
             ),
             patch(
-                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_project",
                 new=AsyncMock(return_value=eval_job),
             ),
             patch(
@@ -264,11 +265,11 @@ class TestPartialRollback:
     async def test_mixed_recall_and_error_thresholds_independent(self) -> None:
         """One deployment has only a recall threshold (breached), another has
         only an error threshold (not breached). Only the first is rolled back."""
-        dep_recall = _dep(dep_id="dep-recall", plan_name="plan-r", recall_threshold=0.75)
-        dep_error = _dep(dep_id="dep-error", plan_name="plan-e", error_threshold=0.10)
+        dep_recall = _dep(dep_id="dep-recall", project_name="plan-r", recall_threshold=0.75)
+        dep_error = _dep(dep_id="dep-error", project_name="plan-e", error_threshold=0.10)
 
-        def eval_for_plan(session, plan_name):  # noqa: ANN001
-            if plan_name == "plan-r":
+        def eval_for_plan(session, project_name):  # noqa: ANN001
+            if project_name == "plan-r":
                 return _eval(recall_at_5=0.50)  # breaches recall
             return _eval(total_queries=100, failed_queries=5)  # 5% < 10% threshold
 
@@ -281,7 +282,7 @@ class TestPartialRollback:
                 new=AsyncMock(return_value=[dep_recall, dep_error]),
             ),
             patch(
-                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_project",
                 new=AsyncMock(side_effect=eval_for_plan),
             ),
             patch(
@@ -304,8 +305,8 @@ class TestWatchdogResilience:
     async def test_watchdog_returns_correct_count_on_success(self) -> None:
         """Sanity: when no deployments breach thresholds, count is 0."""
         deps = [
-            _dep(dep_id="dep-a", plan_name="plan-a", recall_threshold=0.70),
-            _dep(dep_id="dep-b", plan_name="plan-b", error_threshold=0.05),
+            _dep(dep_id="dep-a", project_name="plan-a", recall_threshold=0.70),
+            _dep(dep_id="dep-b", project_name="plan-b", error_threshold=0.05),
         ]
         evals = {
             "plan-a": _eval(recall_at_5=0.85),
@@ -319,7 +320,7 @@ class TestWatchdogResilience:
                 new=AsyncMock(return_value=deps),
             ),
             patch(
-                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_project",
                 new=AsyncMock(side_effect=lambda s, name: evals[name]),
             ),
         ):
@@ -342,7 +343,7 @@ class TestWatchdogResilience:
                 new=AsyncMock(return_value=[dep]),
             ),
             patch(
-                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_project",
                 new=AsyncMock(return_value=eval_job),
             ),
             patch(
@@ -369,7 +370,7 @@ class TestWatchdogResilience:
                 new=AsyncMock(return_value=[dep]),
             ),
             patch(
-                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_plan",
+                "retrieval_os.deployments.service.eval_repo.get_latest_completed_for_project",
                 new=eval_mock,
             ),
         ):

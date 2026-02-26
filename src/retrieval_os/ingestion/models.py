@@ -26,7 +26,7 @@ class IngestionJob(Base):
     __tablename__ = "ingestion_jobs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    plan_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    project_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     index_config_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("index_configs.id"), nullable=False
     )
