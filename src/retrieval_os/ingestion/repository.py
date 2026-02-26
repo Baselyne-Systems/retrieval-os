@@ -66,6 +66,25 @@ class IngestionRepository:
         await session.flush()
         return job
 
+    async def get_completed_for_config(
+        self,
+        session: AsyncSession,
+        project_name: str,
+        index_config_version: int,
+    ) -> IngestionJob | None:
+        """Return the most recent COMPLETED job for this (project, config version), if any."""
+        result = await session.execute(
+            select(IngestionJob)
+            .where(
+                IngestionJob.project_name == project_name,
+                IngestionJob.index_config_version == index_config_version,
+                IngestionJob.status == IngestionJobStatus.COMPLETED.value,
+            )
+            .order_by(IngestionJob.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def complete_job(
         self,
         session: AsyncSession,
@@ -75,6 +94,7 @@ class IngestionRepository:
         total_chunks: int,
         indexed_chunks: int,
         failed_chunks: int,
+        duplicate_of: str | None = None,
     ) -> None:
         job = await self.get(session, job_id)
         if job is None:
@@ -84,6 +104,7 @@ class IngestionRepository:
         job.total_chunks = total_chunks
         job.indexed_chunks = indexed_chunks
         job.failed_chunks = failed_chunks
+        job.duplicate_of = duplicate_of
         job.completed_at = datetime.now(UTC)
         await session.flush()
 

@@ -195,6 +195,218 @@ All unit tests run in ~0.1s total, no Docker required.
 
 ---
 
+## Configuring Auto-Eval
+
+When a deployment is activated, Retrieval-OS can automatically queue an evaluation job — no manual POST to `/v1/eval/jobs` required. Set `eval_dataset_uri` on the deployment at creation time:
+
+```bash
+curl -X POST http://localhost:8000/v1/projects/docs-search/deployments \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "index_config_version": 3,
+    "top_k": 10,
+    "eval_dataset_uri": "s3://my-bucket/eval/docs-search-ground-truth.jsonl",
+    "rollback_recall_threshold": 0.80,
+    "created_by": "deploy-pipeline"
+  }'
+```
+
+**Lifecycle:**
+
+1. Deployment created (`PENDING`).
+2. Deployment activated (status → `ACTIVE`, `traffic_weight` → 1.0).
+3. Auto-eval fires: a new `EvalJob` row is inserted with `created_by="system:auto-eval"` and `dataset_uri` from `eval_dataset_uri`.
+4. Background `eval_job_runner` picks up the job, scores recall/MRR/NDCG against the ground-truth file.
+5. Background `rollback_watchdog` reads the completed metrics. If `recall_at_5 < rollback_recall_threshold`, rollback triggers automatically.
+
+**Ground-truth format** (one JSON object per line):
+
+```jsonl
+{"query": "how to reset password", "relevant_ids": ["doc-42", "doc-17"]}
+{"query": "billing invoice download", "relevant_ids": ["doc-91"]}
+```
+
+**What happens when auto-eval fails to queue:**
+`auto_queue_eval()` is best-effort — it wraps the queue call in `try/except` and logs a warning but never raises. The activation succeeds regardless. Check `retrieval_os_eval_regression_alerts_total` in Prometheus or poll `GET /v1/eval/jobs?project_name=<name>` to verify a job was created.
+
+**Monitoring via webhooks:**
+Subscribe to the `eval.job.completed` event to receive a signed webhook payload when the job finishes:
+
+```bash
+curl -X POST http://localhost:8000/v1/webhooks \
+  -d '{"url": "https://your-service/hooks", "events": ["eval.job.completed", "deployment.rolled_back"]}'
+```
+
+---
+
+## Query Timeout Tuning
+
+Every query is wrapped in `asyncio.wait_for()` with a configurable deadline. If the Qdrant search or embedding call stalls, the server cancels the task and returns **HTTP 504** with `"error": "QUERY_TIMEOUT"` — no worker is left hanging.
+
+**Configuration:**
+
+```env
+QUERY_TIMEOUT_SECONDS=30.0   # default; float
+```
+
+**Recommended values by use case:**
+
+| Use case | Recommended timeout |
+|---|---|
+| Interactive search (UI) | 5–10 s |
+| Batch pipeline (offline) | 60–120 s |
+| SLA-critical API | 2–5 s |
+| Development / debugging | 120 s |
+
+**How it surfaces to clients:**
+
+```json
+HTTP 504
+{
+  "error": "QUERY_TIMEOUT",
+  "message": "Query exceeded timeout of 30.0s",
+  "request_id": "01j..."
+}
+```
+
+**Interaction with circuit breaker:**
+The circuit breaker wraps individual Qdrant calls. A timeout cancels the in-flight task before the circuit breaker's own error counter increments — so a single hung query will not trip the breaker. Sustained timeouts (many requests) will eventually trip it.
+
+**Per-request override (not yet supported):**
+The timeout is a global setting. If you need different SLAs per project, deploy separate Retrieval-OS instances with different `QUERY_TIMEOUT_SECONDS`.
+
+---
+
+## Ingestion Deduplication
+
+If you POST `/v1/ingestion/jobs` for a project and index config version that already has a COMPLETED ingestion job, the new job will **skip all chunking, embedding, and Qdrant upserts**. It copies the stats from the original job and marks itself COMPLETED immediately.
+
+**When it triggers:**
+Same `(project_name, index_config_version)` pair, and the prior job's status is `COMPLETED`. The dedup check runs before any embedding work starts.
+
+**What `duplicate_of` means in responses:**
+
+```json
+{
+  "id": "01j...",
+  "status": "COMPLETED",
+  "indexed_chunks": 4231,
+  "duplicate_of": "01j...<original job id>",
+  ...
+}
+```
+
+`duplicate_of` is the ID of the original completed job whose vectors are already in Qdrant. The duplicate job's `indexed_chunks` / `total_chunks` are copied verbatim from the original.
+
+**How to force a re-index:**
+Dedup is scoped to a specific `index_config_version`. To re-index (e.g. after updating source documents), create a new IndexConfig version first:
+
+```bash
+# Create a new index config version (increments version automatically)
+curl -X POST http://localhost:8000/v1/projects/docs-search/index-configs \
+  -d '{"embedding_model": "all-MiniLM-L6-v2", ..., "change_comment": "re-index with updated docs"}'
+
+# Submit ingestion job against the new version
+curl -X POST http://localhost:8000/v1/ingestion/jobs \
+  -d '{"project_name": "docs-search", "index_config_version": 4, ...}'
+```
+
+---
+
+## Running the Test Suite
+
+The test suite has four distinct layers. Each layer requires different infrastructure and proves different guarantees.
+
+### Unit Tests (`make test-unit`)
+
+```bash
+uv run pytest tests/unit/ -q --tb=short
+```
+
+- **Requires:** Nothing (pure Python, no Docker).
+- **Run time:** ~1–2 s for 381 tests.
+- **What it proves:** Correctness of individual functions — service logic, schema validators, state machines, config hash computation, cache key derivation.
+
+### Integration Tests
+
+```bash
+uv run pytest tests/integration/ -q --tb=short
+```
+
+- **Requires:** Nothing (all I/O is mocked with `AsyncMock`).
+- **What it proves:** Service-layer orchestration — that services call repositories correctly, handle errors, and return the right response shapes. All DB/Redis/Qdrant calls are replaced with `AsyncMock`.
+
+### Microbenchmarks (`make test-benchmarks`)
+
+```bash
+uv run pytest tests/benchmarks/ -v --tb=short
+```
+
+- **Requires:** Nothing — pure Python, no infra.
+- **What each file measures:**
+
+| File | What it benchmarks | Why it matters |
+|---|---|---|
+| `test_iteration_velocity.py` | Throughput of chunker, config hash, RRF fusion | Sets the CPU ceiling for sustained QPS |
+| `test_quality_stability.py` | Score variance across repeated RRF / rerank calls | Guards against non-determinism bugs |
+| `test_operational_reliability.py` | Graceful degradation paths (no reranker, empty results) | Proves fallbacks have near-zero overhead |
+| `test_cost_efficiency.py` | Aggregation loops, token estimation, recommendation logic | Ensures cost reporting adds < 1 ms/query |
+| `test_latency_predictability.py` | p99 spread of JSON encode/decode, cache key derivation | Bounds the overhead budget for the hot path |
+
+**Interpreting results:** Each test asserts a maximum elapsed time using `time.perf_counter()`. These are process-level measurements with no I/O, so they reflect pure CPU cost. A 0.05 ms JSON overhead at 10 k QPS costs ~500 ms of aggregate CPU — the thresholds are set with that budget in mind.
+
+### E2E Failure Mode Tests (`make test-e2e`)
+
+```bash
+uv run pytest tests/e2e/ -v --tb=short
+```
+
+- **Requires:** Postgres + Redis (`make infra && make migrate`). Qdrant is **not** required.
+- **Run time:** ~5–15 s.
+- **What each scenario proves:**
+
+| Scenario | What it proves |
+|---|---|
+| Concurrent `SELECT FOR UPDATE SKIP LOCKED` | Only one worker claims a QUEUED job at a time under concurrency |
+| Redis warm cache serves stale config | Serving never touches Postgres; stale cache is acceptable |
+| Cache invalidation on rollback | `clear_active_deployment()` deletes both Redis keys atomically |
+| `ProjectNotFound` → 404 | Unknown project names never reach the index |
+| Watchdog skips healthy deployments | Watchdog does not roll back deployments that pass thresholds |
+| Watchdog rolls back on recall breach | A low-recall eval triggers ROLLED_BACK automatically |
+
+**Adding a new failure mode test:**
+1. Add a test class in `tests/e2e/test_failure_modes.py` (or a new file).
+2. Use `e2e_session` fixture for a real DB session, `load_project` for a pre-created project.
+3. Assert the final DB state or error response — do not assert timing (use load tests for that).
+
+### Load Tests (`make test-load`)
+
+```bash
+uv run pytest tests/load/ -v --tb=short
+```
+
+- **Requires:** Postgres + Redis + Qdrant (`make infra && make migrate`).
+- **Run time:** 30–120 s depending on test.
+- **What each file proves:**
+
+| File | Claim it proves |
+|---|---|
+| `test_query_latency.py` | Qdrant ANN p99 < 50 ms on 10 k vectors; cache hit p99 < 20 ms; cache miss p95 < 100 ms |
+| `test_concurrent_load.py` | ≥ 50 QPS sustained on cache-miss path; ≥ 500 QPS on cache-hit path |
+| `test_ingestion_throughput.py` | ≥ 1 000 vectors/sec upsert to Qdrant |
+| `test_deployment_lifecycle.py` | Zero HTTP errors during live config switch; rollback clears Redis key < 2 s |
+| `test_cache_efficiency.py` | Warm-cache Qdrant calls == 0; warm QPS ≥ 5 × cold QPS |
+| `test_ingestion_dedup.py` | Second ingest job for same config version skips embedding entirely |
+| `test_sla_timeout.py` | Hanging backend → HTTP 504 within `QUERY_TIMEOUT_SECONDS + 1 s`; fast query unaffected |
+| `test_eval_rollback_workflow.py` | Auto-eval is queued on activation; low-recall eval triggers ROLLED_BACK under query load |
+
+**Important notes:**
+- **Embedding latency is excluded** from QPS measurements. The load tests patch `embed_text` with a stub vector. Real embedding adds ~5–50 ms depending on model size and hardware — treat that as additive to load-test numbers.
+- **Concurrency saturation point:** A single Qdrant node saturates at roughly 10 concurrent ANN queries on the default resource profile. Beyond that, p99 latency rises sharply. Scale horizontally (multiple Qdrant nodes + shard) before hitting production traffic.
+- **Interpreting summary output:** `pytest -v` prints each test's wall-clock duration. Tests that assert specific QPS targets print their measured throughput in `pytest.fail()` messages when thresholds are not met — check those for the actual numbers.
+
+---
+
 ## Writing Tests
 
 ### Unit tests (no DB)

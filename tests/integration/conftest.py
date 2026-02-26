@@ -150,6 +150,7 @@ def make_deployment_response(
         rollout_step_interval_seconds=None,
         rollback_recall_threshold=rollback_recall_threshold,
         rollback_error_rate_threshold=rollback_error_rate_threshold,
+        eval_dataset_uri=None,
         change_note="test deploy",
         created_at=_ts(),
         updated_at=_ts(),

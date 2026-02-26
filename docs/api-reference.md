@@ -143,6 +143,7 @@ Execute a retrieval query. This is the hot path — P99 target < 200ms.
 | 404 | `PROJECT_NOT_FOUND` | No project with this name, or project is archived. |
 | 503 | `EMBEDDING_PROVIDER_ERROR` | Embedding model unavailable or not installed. |
 | 503 | `INDEX_BACKEND_ERROR` | Qdrant unreachable or collection not found. |
+| 504 | `QUERY_TIMEOUT` | The full retrieval pipeline (embed + ANN + cache write) exceeded `QUERY_TIMEOUT_SECONDS` (default 30 s). |
 
 ---
 
@@ -415,6 +416,7 @@ Deploy an IndexConfig version with search config.
 | `rollout_step_interval_seconds` | int | Both or neither | — | Seconds between steps. Min 10. |
 | `rollback_recall_threshold` | float | No | null | Auto-rollback if Recall@5 drops below this (0.0–1.0). |
 | `rollback_error_rate_threshold` | float | No | null | Auto-rollback if error rate exceeds this (0.0–1.0). |
+| `eval_dataset_uri` | string\|null | No | null | S3 URI of a JSONL eval dataset. If set, an eval job is automatically queued when this deployment is activated. Format: `s3://bucket/path.jsonl`. |
 | `change_note` | string | No | `""` | Human-readable description. Max 2048 chars. |
 | `created_by` | string | Yes | — | Identity of deployer. |
 
@@ -438,6 +440,7 @@ Deploy an IndexConfig version with search config.
   "rollout_step_interval_seconds": null,
   "rollback_recall_threshold": null,
   "rollback_error_rate_threshold": null,
+  "eval_dataset_uri": null,
   "change_note": "upgrading to bge-m3",
   "created_at": "2026-02-25T12:05:00Z",
   "updated_at": "2026-02-25T12:05:00Z",
@@ -726,6 +729,7 @@ Each line in the JSONL file must be: `{"id": "...", "content": "...", "metadata"
   "indexed_chunks": null,
   "failed_chunks": null,
   "error_message": null,
+  "duplicate_of": null,
   "created_at": "2026-02-25T12:00:00Z",
   "started_at": null,
   "completed_at": null,
@@ -744,6 +748,7 @@ Each line in the JSONL file must be: `{"id": "...", "content": "...", "metadata"
 | `indexed_chunks` | int\|null | Chunks successfully upserted to Qdrant. |
 | `failed_chunks` | int\|null | Chunks that failed to embed or upsert. |
 | `error_message` | string\|null | Set if the job reaches FAILED status. |
+| `duplicate_of` | string\|null | If set, this job was a dedup no-op; the value is the `id` of the prior COMPLETED job for the same `(project_name, index_config_version)`. No embedding or Qdrant upsert was performed. |
 | `started_at` | timestamp\|null | When the background runner claimed the job. |
 | `completed_at` | timestamp\|null | When the job reached COMPLETED or FAILED. |
 

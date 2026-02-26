@@ -72,6 +72,9 @@ class Deployment(Base):
     rollback_recall_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
     rollback_error_rate_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # Auto-eval: if set, an eval job is automatically queued when this deployment goes ACTIVE
+    eval_dataset_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Governance
     change_note: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

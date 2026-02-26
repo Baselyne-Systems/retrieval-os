@@ -99,6 +99,17 @@ class CircuitOpenError(UpstreamError):
     error_code = "CIRCUIT_BREAKER_OPEN"
 
 
+# ── 504 Gateway Timeout ───────────────────────────────────────────────────────
+
+
+class QueryTimeoutError(RetrievalOSError):
+    status_code = 504
+    error_code = "QUERY_TIMEOUT"
+
+    def __init__(self, timeout_s: float) -> None:
+        super().__init__(f"Query exceeded timeout of {timeout_s:.1f}s")
+
+
 # ── 401 Authentication ─────────────────────────────────────────────────────────
 
 

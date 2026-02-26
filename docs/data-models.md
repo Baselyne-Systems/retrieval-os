@@ -90,6 +90,7 @@ A deployment binds an IndexConfig to live traffic, carries the runtime search co
 | `rollout_step_interval_seconds` | INTEGER | Yes | `NULL` | Seconds between rollout steps. |
 | `rollback_recall_threshold` | FLOAT | Yes | `NULL` | Auto-rollback if Recall@5 drops below this. |
 | `rollback_error_rate_threshold` | FLOAT | Yes | `NULL` | Auto-rollback if error rate exceeds this. |
+| `eval_dataset_uri` | TEXT | Yes | `NULL` | S3 URI of JSONL eval dataset. If set, an EvalJob is automatically queued when this deployment is activated. |
 | **Search config** | | | | |
 | `top_k` | INTEGER | No | 10 | Number of ANN candidates returned from the index. |
 | `rerank_top_k` | INTEGER | Yes | `NULL` | Post-rerank result count. Must be ≤ `top_k` if set. |
@@ -320,6 +321,7 @@ Tracks document ingestion jobs. Each job chunks, embeds, and upserts documents i
 | `total_chunks` | INTEGER | Yes | `NULL` | Total chunks generated. |
 | `indexed_chunks` | INTEGER | Yes | `NULL` | Chunks successfully upserted to Qdrant. |
 | `failed_chunks` | INTEGER | Yes | `NULL` | Chunks that failed to embed or upsert. |
+| `duplicate_of` | VARCHAR(36) | Yes | `NULL` | ID of a previously COMPLETED job with the same `(project_name, index_config_version)`. Set when re-embedding is skipped; stats are copied from the original job rather than recomputed. |
 | `error_message` | TEXT | Yes | `NULL` | Set if status is FAILED. |
 | `created_at` | TIMESTAMPTZ | No | — | Job submission timestamp. |
 | `started_at` | TIMESTAMPTZ | Yes | `NULL` | When the background runner claimed the job. |

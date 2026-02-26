@@ -34,6 +34,29 @@ An **Evaluation Job** measures retrieval quality for a project. You provide labe
 
 When creating a deployment, you can attach quality thresholds: a minimum Recall@5, a maximum error rate, or both. The rollback watchdog checks active deployments against the latest completed evaluation. If a threshold is breached, the deployment is rolled back automatically — no human required.
 
+#### Automatic Quality Gating
+
+Setting `eval_dataset_uri` on a deployment closes the quality loop automatically:
+
+1. **Activate** — `POST /v1/projects/{name}/deployments` with `eval_dataset_uri` set.
+2. **Auto-eval** — On activation the service calls `auto_queue_eval()`, which creates a QUEUED `EvalJob` for the same `index_config_version`. This is **best-effort**: if the queue call fails (e.g., DB error) the deployment still becomes ACTIVE.
+3. **Eval runner** — The background `eval_job_runner` loop picks up the job, runs retrieval against the eval dataset, and writes back Recall@k / MRR / NDCG metrics.
+4. **Watchdog** — The `rollback_watchdog` loop reads the completed eval result and compares it against the deployment's `rollback_recall_threshold` / `rollback_error_rate_threshold`. If a threshold is breached, the deployment is automatically rolled back.
+
+Without `eval_dataset_uri`, eval jobs must be queued manually via `POST /v1/eval/jobs`.
+
+#### Query Timeout
+
+Every query through `route_query()` is wrapped with `asyncio.wait_for(timeout=settings.query_timeout_seconds)` (default: 30 s). If Qdrant or the embedding backend hangs past this deadline, the call is cancelled and the API returns HTTP 504 with `{"error": "QUERY_TIMEOUT"}`. Configure via the `QUERY_TIMEOUT_SECONDS` environment variable.
+
+The timeout applies to the full retrieval pipeline (embed + ANN + cache write). The circuit breaker (`CircuitOpenError`) fires independently on repeated upstream failures and returns HTTP 503.
+
+#### Ingestion Deduplication
+
+Before embedding a new ingestion job, the runner checks for an existing COMPLETED job for the same `(project_name, index_config_version)`. If one exists the new job is marked COMPLETED immediately, with `duplicate_of` set to the prior job's id and counters copied from it. No embedding or Qdrant upsert is performed.
+
+**"Same config version"** means the same `index_config_version` integer for the same project — i.e., re-POSTing `/ingest` with the same documents or a different document set against the same IndexConfig version. To force a re-index, create a new IndexConfig version (which increments the version number) and submit a new ingestion job for that version.
+
 ### Lineage
 
 Every artifact produced by the system — a chunked dataset, an embedding run, an index snapshot — is recorded as a node in a lineage graph, with directed edges linking parents to children. You can trace any document chunk in the index back to its source file, the embedding model that encoded it, and the IndexConfig version that owns it.
@@ -424,3 +447,23 @@ All errors inherit from `RetrievalOSError` which carries `status_code`, `error_c
 | `EmbeddingProviderError` | 503 | `EMBEDDING_PROVIDER_ERROR` |
 
 Validation errors include a `detail.errors` list with one message per failed field, so callers see all problems at once rather than iterating through fix-and-retry cycles.
+
+
+---
+
+## Test Architecture
+
+Retrieval-OS has four test layers, each proving a distinct class of correctness.
+
+| Layer | Location | What it proves |
+|---|---|---|
+| Unit | `tests/unit/` | Correctness of individual functions: service logic, validators, state machines, schema parsing |
+| Microbenchmarks | `tests/benchmarks/` | In-process CPU overhead of the serving hot-path (JSON decode, key derivation, config merge, metric computation) — no I/O, no infrastructure |
+| E2E failure modes | `tests/e2e/` | Correct behaviour under adverse conditions with real Postgres/Redis: unknown project → 404, no active deployment → fast fail, watchdog skips healthy deployments, watchdog rolls back on recall breach |
+| Load | `tests/load/` | Real system throughput and latency (real Qdrant + Redis + Postgres): QPS, p99, sustained stability, Zipf cache hit rate, zero-downtime upgrade, rollback speed, ingestion dedup, SLA timeout enforcement |
+
+**Microbenchmarks** run purely in-process — no sockets, no threads, no filesystem. They establish a CPU budget: if `< 0.05 ms/query` overhead is demonstrated here, a 10 k QPS serving target adds less than 500 ms of pure Python overhead per CPU core.
+
+**E2E failure mode tests** require `make infra && make migrate` (Postgres + Redis only; Qdrant not needed). They test the branches that are hard to exercise with mocks: SELECT FOR UPDATE SKIP LOCKED fairness, Redis cache invalidation on rollback, watchdog triggering rollback on a breached threshold.
+
+**Load tests** require the full stack (`make infra` including Qdrant). Embedding is intentionally stubbed with random unit vectors throughout — this isolates the infrastructure latency that Retrieval-OS controls. Real embedding latency (2–150 ms depending on model and hardware) is additive and documented separately.

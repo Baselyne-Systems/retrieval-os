@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = False  # Enable per-tenant rate limiting
     rate_limit_default_rpm: int = 60  # Default max requests/minute per tenant
 
+    # ── Serving SLAs ──────────────────────────────────────────────────────────
+    query_timeout_seconds: float = 30.0
+
     # ── Background task intervals ─────────────────────────────────────────────
     rollback_watchdog_interval_seconds: int = 30
     rollout_stepper_interval_seconds: int = 10

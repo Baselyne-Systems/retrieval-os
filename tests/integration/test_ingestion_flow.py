@@ -134,6 +134,10 @@ class TestProcessIngestionJob:
                 new=AsyncMock(return_value=pv),
             ),
             patch(
+                "retrieval_os.ingestion.service.ingestion_repo.get_completed_for_config",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
                 "retrieval_os.ingestion.service.embed_text",
                 new=AsyncMock(return_value=fake_vectors),
             ),
@@ -190,6 +194,10 @@ class TestProcessIngestionJob:
                 new=AsyncMock(return_value=pv),
             ),
             patch(
+                "retrieval_os.ingestion.service.ingestion_repo.get_completed_for_config",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
                 "retrieval_os.ingestion.service.embed_text",
                 new=AsyncMock(side_effect=lambda texts, **kw: [[0.0] * 768] * len(texts)),
             ),
@@ -240,6 +248,10 @@ class TestProcessIngestionJob:
                 new=AsyncMock(return_value=pv),
             ),
             patch(
+                "retrieval_os.ingestion.service.ingestion_repo.get_completed_for_config",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
                 "retrieval_os.ingestion.service.embed_text",
                 new=AsyncMock(side_effect=RuntimeError("GPU OOM")),
             ),
@@ -281,6 +293,10 @@ class TestProcessIngestionJob:
             patch(
                 "retrieval_os.ingestion.service._load_index_config",
                 new=AsyncMock(return_value=pv),
+            ),
+            patch(
+                "retrieval_os.ingestion.service.ingestion_repo.get_completed_for_config",
+                new=AsyncMock(return_value=None),
             ),
             patch(
                 "retrieval_os.ingestion.service.embed_text",

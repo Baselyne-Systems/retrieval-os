@@ -92,6 +92,22 @@ class TestDeploymentSchemas:
         assert req.rollout_step_percent == 10.0
         assert req.rollout_step_interval_seconds == 60
 
+    def test_create_request_with_eval_dataset_uri(self) -> None:
+        from retrieval_os.deployments.schemas import CreateDeploymentRequest
+
+        req = CreateDeploymentRequest(
+            index_config_version=1,
+            eval_dataset_uri="s3://bucket/eval.jsonl",
+            created_by="alice",
+        )
+        assert req.eval_dataset_uri == "s3://bucket/eval.jsonl"
+
+    def test_create_request_eval_dataset_uri_defaults_to_none(self) -> None:
+        from retrieval_os.deployments.schemas import CreateDeploymentRequest
+
+        req = CreateDeploymentRequest(index_config_version=1, created_by="alice")
+        assert req.eval_dataset_uri is None
+
     def test_create_request_with_search_config(self) -> None:
         from retrieval_os.deployments.schemas import CreateDeploymentRequest
 
@@ -114,6 +130,44 @@ class TestDeploymentSchemas:
         with pytest.raises(Exception):
             CreateDeploymentRequest(index_config_version=0, created_by="alice")
 
+    def test_deployment_response_includes_eval_dataset_uri(self) -> None:
+        import uuid
+
+        from retrieval_os.deployments.schemas import DeploymentResponse
+
+        now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+        resp = DeploymentResponse(
+            id="d1",
+            project_name="p",
+            project_id=uuid.uuid4(),
+            index_config_id=uuid.uuid4(),
+            index_config_version=1,
+            top_k=10,
+            rerank_top_k=None,
+            reranker=None,
+            hybrid_alpha=None,
+            metadata_filters=None,
+            tenant_isolation_field=None,
+            cache_enabled=True,
+            cache_ttl_seconds=3600,
+            max_tokens_per_query=None,
+            status="ACTIVE",
+            traffic_weight=1.0,
+            rollout_step_percent=None,
+            rollout_step_interval_seconds=None,
+            rollback_recall_threshold=None,
+            rollback_error_rate_threshold=None,
+            eval_dataset_uri="s3://bucket/eval.jsonl",
+            change_note="",
+            created_at=now,
+            updated_at=now,
+            created_by="alice",
+            activated_at=now,
+            rolled_back_at=None,
+            rollback_reason=None,
+        )
+        assert resp.eval_dataset_uri == "s3://bucket/eval.jsonl"
+
     def test_rollback_request_valid(self) -> None:
         from retrieval_os.deployments.schemas import RollbackRequest
 
@@ -128,6 +182,76 @@ class TestDeploymentSchemas:
 
 
 # ── Traffic helpers ───────────────────────────────────────────────────────────
+
+
+# ── Auto-eval trigger ─────────────────────────────────────────────────────────
+
+
+class TestAutoEvalTrigger:
+    @pytest.mark.asyncio
+    async def test_auto_queue_eval_called_with_uri(self) -> None:
+        """auto_queue_eval is called when eval_dataset_uri is set on deployment."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from retrieval_os.evaluations.service import auto_queue_eval
+
+        deployment = MagicMock()
+        deployment.eval_dataset_uri = "s3://bucket/eval.jsonl"
+        deployment.index_config_version = 1
+        deployment.top_k = 10
+
+        mock_session = MagicMock()
+
+        with patch(
+            "retrieval_os.evaluations.service.queue_eval_job",
+            new=AsyncMock(return_value=MagicMock(id="job-1")),
+        ) as mock_queue:
+            await auto_queue_eval(mock_session, "my-project", deployment)
+
+        mock_queue.assert_awaited_once()
+        req = mock_queue.call_args[0][1]
+        assert req.project_name == "my-project"
+        assert req.dataset_uri == "s3://bucket/eval.jsonl"
+        assert req.created_by == "system:auto-eval"
+
+    @pytest.mark.asyncio
+    async def test_auto_queue_eval_skips_when_uri_none(self) -> None:
+        """auto_queue_eval returns None immediately when eval_dataset_uri is None."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from retrieval_os.evaluations.service import auto_queue_eval
+
+        deployment = MagicMock()
+        deployment.eval_dataset_uri = None
+
+        with patch(
+            "retrieval_os.evaluations.service.queue_eval_job", new=AsyncMock()
+        ) as mock_queue:
+            await auto_queue_eval(MagicMock(), "p", deployment)
+
+        # Return value is None when eval_dataset_uri is None
+        mock_queue.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_auto_queue_eval_never_raises(self) -> None:
+        """auto_queue_eval swallows exceptions so activation is never blocked."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from retrieval_os.evaluations.service import auto_queue_eval
+
+        deployment = MagicMock()
+        deployment.eval_dataset_uri = "s3://bucket/eval.jsonl"
+        deployment.index_config_version = 1
+        deployment.top_k = 10
+
+        with patch(
+            "retrieval_os.evaluations.service.queue_eval_job",
+            new=AsyncMock(side_effect=RuntimeError("DB down")),
+        ):
+            # Must not raise
+            await auto_queue_eval(MagicMock(), "p", deployment)
+
+        # Return value is None on exception (no raise)
 
 
 class TestTrafficKeys:

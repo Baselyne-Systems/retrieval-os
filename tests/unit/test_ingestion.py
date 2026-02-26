@@ -259,6 +259,138 @@ class TestIngestDocumentRequest:
 # ── process_next_ingestion_job ────────────────────────────────────────────────
 
 
+# ── Ingestion dedup ───────────────────────────────────────────────────────────
+
+
+class TestIngestionDedup:
+    @pytest.mark.asyncio
+    async def test_dedup_skips_embed_when_completed_job_exists(self) -> None:
+        """When a completed job exists for the same config, embed_text is never called."""
+        from retrieval_os.ingestion.service import process_next_ingestion_job
+
+        now = datetime.now(UTC)
+        fake_job = IngestionJob(
+            id="j-new",
+            project_name="acme",
+            index_config_version=1,
+            source_uri=None,
+            document_payload=[{"id": "d1", "content": "content", "metadata": {}}],
+            chunk_size=512,
+            overlap=64,
+            status="RUNNING",
+            created_at=now,
+        )
+
+        existing_completed = IngestionJob(
+            id="j-prior",
+            project_name="acme",
+            index_config_version=1,
+            source_uri=None,
+            document_payload=None,
+            chunk_size=512,
+            overlap=64,
+            status="COMPLETED",
+            created_at=now,
+            total_docs=2,
+            total_chunks=10,
+            indexed_chunks=9,
+            failed_chunks=1,
+        )
+
+        fake_pv = MagicMock()
+        fake_pv.embedding_provider = "sentence_transformers"
+        fake_pv.embedding_model = "all-MiniLM-L6-v2"
+        fake_pv.embedding_normalize = True
+        fake_pv.embedding_batch_size = 32
+        fake_pv.index_backend = "qdrant"
+        fake_pv.index_collection = "acme-v1"
+
+        complete_mock = AsyncMock()
+        embed_mock = AsyncMock(return_value=[[0.1, 0.2]])
+        mock_session = MagicMock()
+
+        with (
+            patch(
+                "retrieval_os.ingestion.service.ingestion_repo.claim_next_queued",
+                new=AsyncMock(return_value=fake_job),
+            ),
+            patch(
+                "retrieval_os.ingestion.service._load_index_config",
+                new=AsyncMock(return_value=fake_pv),
+            ),
+            patch(
+                "retrieval_os.ingestion.service.ingestion_repo.get_completed_for_config",
+                new=AsyncMock(return_value=existing_completed),
+            ),
+            patch(
+                "retrieval_os.ingestion.service.ingestion_repo.complete_job",
+                new=complete_mock,
+            ),
+            patch("retrieval_os.ingestion.service.embed_text", new=embed_mock),
+        ):
+            result = await process_next_ingestion_job(mock_session)
+
+        assert result == "j-new"
+        embed_mock.assert_not_called()
+        complete_mock.assert_awaited_once()
+        _, kwargs = complete_mock.call_args
+        assert kwargs["duplicate_of"] == "j-prior"
+        assert kwargs["indexed_chunks"] == 9
+
+    @pytest.mark.asyncio
+    async def test_dedup_proceeds_normally_when_no_prior_job(self) -> None:
+        """When no completed job exists, embed_text is called normally."""
+        from retrieval_os.ingestion.service import process_next_ingestion_job
+
+        now = datetime.now(UTC)
+        fake_job = IngestionJob(
+            id="j-first",
+            project_name="acme",
+            index_config_version=1,
+            source_uri=None,
+            document_payload=[{"id": "d1", "content": "word " * 10, "metadata": {}}],
+            chunk_size=512,
+            overlap=64,
+            status="RUNNING",
+            created_at=now,
+        )
+
+        fake_pv = MagicMock()
+        fake_pv.embedding_provider = "sentence_transformers"
+        fake_pv.embedding_model = "all-MiniLM-L6-v2"
+        fake_pv.embedding_normalize = True
+        fake_pv.embedding_batch_size = 32
+        fake_pv.index_backend = "qdrant"
+        fake_pv.index_collection = "acme-v1"
+
+        embed_mock = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
+        mock_session = MagicMock()
+
+        with (
+            patch(
+                "retrieval_os.ingestion.service.ingestion_repo.claim_next_queued",
+                new=AsyncMock(return_value=fake_job),
+            ),
+            patch(
+                "retrieval_os.ingestion.service._load_index_config",
+                new=AsyncMock(return_value=fake_pv),
+            ),
+            patch(
+                "retrieval_os.ingestion.service.ingestion_repo.get_completed_for_config",
+                new=AsyncMock(return_value=None),  # no prior job
+            ),
+            patch("retrieval_os.ingestion.service.embed_text", new=embed_mock),
+            patch("retrieval_os.ingestion.service.upsert_vectors", new=AsyncMock(return_value=1)),
+            patch("retrieval_os.ingestion.service._register_ingestion_lineage", new=AsyncMock()),
+            patch("retrieval_os.ingestion.service.fire_webhook_event", new=AsyncMock()),
+            patch("retrieval_os.ingestion.service.ingestion_repo.complete_job", new=AsyncMock()),
+        ):
+            result = await process_next_ingestion_job(mock_session)
+
+        assert result == "j-first"
+        embed_mock.assert_called()
+
+
 class TestProcessNextIngestionJob:
     @pytest.mark.asyncio
     async def test_returns_none_when_no_jobs(self) -> None:
@@ -308,6 +440,10 @@ class TestProcessNextIngestionJob:
             patch(
                 "retrieval_os.ingestion.service._load_index_config",
                 new=AsyncMock(return_value=fake_pv),
+            ),
+            patch(
+                "retrieval_os.ingestion.service.ingestion_repo.get_completed_for_config",
+                new=AsyncMock(return_value=None),
             ),
             patch(
                 "retrieval_os.ingestion.service.embed_text",

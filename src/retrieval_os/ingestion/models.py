@@ -52,6 +52,9 @@ class IngestionJob(Base):
 
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Dedup: set to the id of the prior completed job when this job was skipped
+    duplicate_of: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

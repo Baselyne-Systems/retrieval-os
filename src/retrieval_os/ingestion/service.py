@@ -244,6 +244,30 @@ async def process_next_ingestion_job(session: AsyncSession) -> str | None:
         # 1. Load index config
         ic = await _load_index_config(session, job.project_name, job.index_config_version)
 
+        # 1a. Dedup check — skip re-embedding if a completed job exists for this config
+        existing = await ingestion_repo.get_completed_for_config(
+            session, job.project_name, job.index_config_version
+        )
+        if existing:
+            await ingestion_repo.complete_job(
+                session,
+                job_id,
+                total_docs=existing.total_docs or 0,
+                total_chunks=existing.total_chunks or 0,
+                indexed_chunks=existing.indexed_chunks or 0,
+                failed_chunks=0,
+                duplicate_of=existing.id,
+            )
+            log.info(
+                "ingestion.job.deduplicated",
+                extra={
+                    "job_id": job_id,
+                    "project": job.project_name,
+                    "duplicate_of": existing.id,
+                },
+            )
+            return job_id
+
         # 2. Load documents
         if job.source_uri:
             docs = await _load_docs_from_s3(job.source_uri)

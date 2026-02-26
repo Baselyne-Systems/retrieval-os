@@ -46,6 +46,36 @@ async def _load_index_config(session: AsyncSession, project_name: str, version: 
     return ic
 
 
+async def auto_queue_eval(
+    session: AsyncSession,
+    project_name: str,
+    deployment: object,
+) -> EvalJobResponse | None:
+    """Queue an eval job automatically when a deployment goes ACTIVE.
+
+    Best-effort — never raises; a scheduling failure must not block activation.
+    """
+    from retrieval_os.evaluations.schemas import QueueEvalJobRequest
+
+    uri = getattr(deployment, "eval_dataset_uri", None)
+    if not uri:
+        return None
+    try:
+        return await queue_eval_job(
+            session,
+            QueueEvalJobRequest(
+                project_name=project_name,
+                index_config_version=deployment.index_config_version,  # type: ignore[union-attr]
+                dataset_uri=uri,
+                top_k=deployment.top_k,  # type: ignore[union-attr]
+                created_by="system:auto-eval",
+            ),
+        )
+    except Exception:
+        log.warning("auto_queue_eval failed", exc_info=True)
+        return None
+
+
 async def queue_eval_job(
     session: AsyncSession,
     request,  # QueueEvalJobRequest

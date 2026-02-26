@@ -27,6 +27,8 @@ class CreateDeploymentRequest(BaseModel):
     # Rollback guard rails (optional)
     rollback_recall_threshold: float | None = Field(None, ge=0.0, le=1.0)
     rollback_error_rate_threshold: float | None = Field(None, ge=0.0, le=1.0)
+    # Auto-eval: if set, an eval job is automatically queued on activation
+    eval_dataset_uri: str | None = None
     change_note: str = Field("", max_length=2048)
     created_by: str = Field(..., min_length=1, max_length=255)
 
@@ -60,6 +62,7 @@ class DeploymentResponse(BaseModel):
     rollout_step_interval_seconds: int | None
     rollback_recall_threshold: float | None
     rollback_error_rate_threshold: float | None
+    eval_dataset_uri: str | None
     change_note: str
     created_at: datetime
     updated_at: datetime

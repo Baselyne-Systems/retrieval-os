@@ -33,6 +33,7 @@ from retrieval_os.deployments.schemas import (
 )
 from retrieval_os.deployments.traffic import clear_active_deployment, set_active_deployment
 from retrieval_os.evaluations.repository import eval_repo
+from retrieval_os.evaluations.service import auto_queue_eval
 from retrieval_os.plans.repository import project_repo
 from retrieval_os.webhooks.delivery import fire_webhook_event
 from retrieval_os.webhooks.events import WebhookEvent
@@ -124,6 +125,7 @@ async def create_deployment(
         rollout_step_interval_seconds=request.rollout_step_interval_seconds,
         rollback_recall_threshold=request.rollback_recall_threshold,
         rollback_error_rate_threshold=request.rollback_error_rate_threshold,
+        eval_dataset_uri=request.eval_dataset_uri,
         change_note=request.change_note,
         created_at=now,
         updated_at=now,
@@ -175,6 +177,8 @@ async def _activate(
         },
         session,
     )
+    # Best-effort: queue an eval job if the deployment carries an eval dataset URI
+    await auto_queue_eval(session, project_name, deployment)
     return deployment
 
 

@@ -8,12 +8,14 @@ Design constraints:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from retrieval_os.core.exceptions import ProjectNotFoundError
+from retrieval_os.core.config import settings
+from retrieval_os.core.exceptions import ProjectNotFoundError, QueryTimeoutError
 from retrieval_os.core.redis_client import get_redis
 from retrieval_os.deployments.repository import deployment_repo
 from retrieval_os.plans.repository import project_repo
@@ -108,25 +110,31 @@ async def route_query(
     if metadata_filter_override:
         filters = {**filters, **metadata_filter_override}
 
-    chunks, cache_hit = await execute_retrieval(
-        project_name=project_name,
-        version=config["index_config_version"],
-        query=query,
-        embedding_provider=config["embedding_provider"],
-        embedding_model=config["embedding_model"],
-        embedding_normalize=config["embedding_normalize"],
-        embedding_batch_size=config["embedding_batch_size"],
-        index_backend=config["index_backend"],
-        index_collection=config["index_collection"],
-        distance_metric=config["distance_metric"],
-        top_k=config["top_k"],
-        reranker=config.get("reranker"),
-        rerank_top_k=config.get("rerank_top_k"),
-        metadata_filters=filters or None,
-        cache_enabled=config["cache_enabled"],
-        cache_ttl_seconds=config["cache_ttl_seconds"],
-        hybrid_alpha=config.get("hybrid_alpha"),
-    )
+    try:
+        chunks, cache_hit = await asyncio.wait_for(
+            execute_retrieval(
+                project_name=project_name,
+                version=config["index_config_version"],
+                query=query,
+                embedding_provider=config["embedding_provider"],
+                embedding_model=config["embedding_model"],
+                embedding_normalize=config["embedding_normalize"],
+                embedding_batch_size=config["embedding_batch_size"],
+                index_backend=config["index_backend"],
+                index_collection=config["index_collection"],
+                distance_metric=config["distance_metric"],
+                top_k=config["top_k"],
+                reranker=config.get("reranker"),
+                rerank_top_k=config.get("rerank_top_k"),
+                metadata_filters=filters or None,
+                cache_enabled=config["cache_enabled"],
+                cache_ttl_seconds=config["cache_ttl_seconds"],
+                hybrid_alpha=config.get("hybrid_alpha"),
+            ),
+            timeout=settings.query_timeout_seconds,
+        )
+    except TimeoutError:
+        raise QueryTimeoutError(settings.query_timeout_seconds)
 
     info = {
         "project_name": project_name,
