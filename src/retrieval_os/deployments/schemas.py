@@ -41,6 +41,7 @@ class DeploymentResponse(BaseModel):
 
     id: str
     plan_name: str
+    project_id: uuid.UUID
     index_config_id: uuid.UUID
     index_config_version: int
     # Search config

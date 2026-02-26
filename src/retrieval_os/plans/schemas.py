@@ -78,6 +78,7 @@ class IndexConfigResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    project_id: uuid.UUID
     version: int
     is_current: bool
 

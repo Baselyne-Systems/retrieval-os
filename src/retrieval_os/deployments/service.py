@@ -106,6 +106,7 @@ async def create_deployment(
     deployment = Deployment(
         id=str(uuid7()),
         plan_name=plan_name,
+        project_id=project.id,
         index_config_id=index_config.id,
         index_config_version=request.index_config_version,
         top_k=request.top_k,

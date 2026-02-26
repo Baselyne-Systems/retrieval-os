@@ -40,6 +40,9 @@ class Deployment(Base):
         PG_UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid7())
     )
     plan_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False, index=True
+    )
 
     # Index config reference
     index_config_id: Mapped[uuid.UUID] = mapped_column(

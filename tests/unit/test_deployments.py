@@ -37,6 +37,7 @@ class TestDeploymentIsLive:
         now = datetime.now(UTC)
         return Deployment(
             plan_name="docs",
+            project_id=uuid.uuid4(),
             index_config_id=uuid.uuid4(),
             index_config_version=1,
             status=status,

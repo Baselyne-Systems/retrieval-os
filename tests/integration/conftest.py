@@ -72,6 +72,7 @@ def make_index_config_response(
 ) -> IndexConfigResponse:
     return IndexConfigResponse(
         id=_FAKE_CONFIG_ID,
+        project_id=uuid.UUID(_FAKE_PROJECT_ID),
         version=version,
         is_current=True,
         embedding_provider="sentence_transformers",
@@ -131,6 +132,7 @@ def make_deployment_response(
     return DeploymentResponse(
         id=dep_id,
         plan_name=plan_name,
+        project_id=uuid.UUID(_FAKE_PROJECT_ID),
         index_config_id=uuid.UUID(_FAKE_CONFIG_ID),
         index_config_version=index_config_version,
         top_k=top_k,
