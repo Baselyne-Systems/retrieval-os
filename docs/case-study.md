@@ -176,6 +176,30 @@ Measured by patching the reranker with a calibrated sleep stub. This quantifies 
 
 A lightweight CPU cross-encoder (`ms-marco-MiniLM`, ~50 ms inference) brings total p50 to ~60 ms. A full GPU cross-encoder (~120 ms) brings it to ~130 ms. Both are bounded: p99 adds less than 10 ms on top of p50, meaning the reranker's latency is consistent rather than spiky.
 
+#### Multimodal query throughput
+
+Image (CLIP) and audio (Whisper) query paths, with ML models stubbed to isolate the serving infrastructure overhead:
+
+| Path | p50 | p99 | QPS | Notes |
+|---|---|---|---|---|
+| Image baseline (sequential) | 3.3 ms | 22.6 ms | 264 | CLIP stubbed, config-load + Qdrant ANN |
+| Image burst (20 concurrent) | 30.3 ms | 40.9 ms | 600 | 0 errors |
+| Audio baseline (sequential) | 3.4 ms | 6.1 ms | 285 | embed_audio stubbed end-to-end |
+| Audio burst (20 concurrent) | 28.3 ms | 33.5 ms | 694 | 0 errors |
+| Text + image mixed (10+10 workers) | 24–31 ms | 32–34 ms | 36–40 | 0 errors, neither modality starved |
+
+The multimodal routing layer adds no measurable overhead on top of the standard text cache-miss path. At 20 concurrent workers, both image and audio paths hold well under 50 ms p99.
+
+**Whisper transcription overhead** (additive on top of the Qdrant ANN cost above):
+
+| Model size | Typical CPU inference | Stub p50 | Stub p99 |
+|---|---|---|---|
+| tiny (39 M params) | ~30 ms | 31.2 ms | 31.3 ms |
+| base (74 M params) | ~150 ms | 151.3 ms | 151.4 ms |
+| large (1.5 B params) | ~500 ms | 501.3 ms | 501.5 ms |
+
+The overhead is precisely additive and consistent (p99 − p50 < 1 ms at every size). Plan your audio query SLA as: Qdrant ANN time + Whisper inference time + text embedding time.
+
 #### Metadata filter latency at different selectivities
 
 10k vectors with `doc_type` and `tenant_id` payload indexes; `year` field unindexed:
@@ -331,7 +355,7 @@ The suite runs across four layers:
 | Unit (381 tests) | Nothing | Logic correctness — state machines, validators, hash computation, metric formulas |
 | Integration (51 tests) | Nothing (all I/O mocked) | Service orchestration — repositories called correctly, typed errors raised correctly |
 | E2E (15 tests) | Postgres + Redis | System behaviour — concurrency safety, cache semantics, watchdog decisions |
-| Load (36 tests) | Postgres + Redis + Qdrant | Operational guarantees — latency, throughput, multi-tenant isolation, ingestion/serving overlap, traffic ramp, reranker overhead, metadata filter selectivity, dedup, timeout, rollback speed |
+| Load (44 tests) | Postgres + Redis + Qdrant | Operational guarantees — latency, throughput, multi-tenant isolation, ingestion/serving overlap, traffic ramp, reranker overhead, metadata filter selectivity, multimodal (image + audio), dedup, timeout, rollback speed |
 
 Adding a new embedding provider, a new reranker, or a new failure mode means writing the test first. The architecture and test structure are designed to make that the path of least resistance.
 
