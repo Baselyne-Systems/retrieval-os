@@ -204,7 +204,7 @@ Create a new plan with version 1.
 | `quantization` | string\|null | null | One of: `scalar`, `product`, null | Vector quantization. Applied at index creation time, not at query time. |
 | `top_k` | int | 10 | `>= 1` | Number of candidates returned from the ANN index. |
 | `rerank_top_k` | int\|null | null | `>= 1` and `<= top_k` | Number of results returned after reranking. Requires `reranker`. |
-| `reranker` | string\|null | null | — | Reranker model identifier. Phase 8. |
+| `reranker` | string\|null | null | — | Reranker identifier in `"provider:model"` format. Supported providers: `cross_encoder` (runs in-process via sentence-transformers), `cohere` (Cohere Rerank API — requires `COHERE_API_KEY`). Examples: `"cross_encoder:cross-encoder/ms-marco-MiniLM-L-6-v2"`, `"cohere:rerank-english-v3.0"`. Bare provider name (e.g. `"cross_encoder"`) uses the default model. |
 | `hybrid_alpha` | float\|null | null | `0.0–1.0` | Dense/sparse blend weight. `1.0` = pure dense. `0.0` = pure sparse. |
 | `metadata_filters` | object\|null | null | — | Default metadata filter applied to every query against this plan. |
 | `tenant_isolation_field` | string\|null | null | — | Payload field used for tenant-scoped filtering. |
@@ -514,6 +514,286 @@ Immediately roll back a live deployment. Sets traffic_weight to 0 and status to 
 |---|---|---|
 | 404 | `DEPLOYMENT_NOT_FOUND` | Deployment not found or belongs to a different plan. |
 | 409 | `DEPLOYMENT_STATE_ERROR` | Deployment is not live (can only roll back ACTIVE or ROLLING_OUT). |
+
+---
+
+## Webhooks
+
+Webhooks deliver signed event notifications to your HTTP endpoints when key state changes occur in the system.
+
+### `POST /v1/webhooks`
+
+Register a new subscription.
+
+**Request body:**
+
+```json
+{
+  "url": "https://your-service.example.com/hooks/retrieval-os",
+  "events": ["deployment.status_changed", "eval.regression_detected"],
+  "secret": "my-shared-secret",
+  "description": "Slack alerting hook"
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `url` | string | Yes | HTTPS URL to deliver events to. Must be a valid HTTP(S) URL. |
+| `events` | list[string] | No | Event types to subscribe to. Empty list (default) = all events. |
+| `secret` | string | No | Shared secret for HMAC-SHA256 request signing. |
+| `description` | string | No | Human-readable label. Max 1024 chars. |
+
+**Available event types:**
+
+| Event | Trigger |
+|---|---|
+| `deployment.status_changed` | Any deployment status transition (ACTIVE, ROLLED_BACK, etc.). |
+| `eval.regression_detected` | An eval job completes and finds recall degraded vs. the previous run. |
+| `plan.version_created` | A new plan version is created. |
+| `cost.threshold_exceeded` | Cost intelligence detects spending above a configured threshold. |
+
+**Response 201:**
+
+```json
+{
+  "id": "018e7a2c-1111-7000-d456-789012abcdef",
+  "url": "https://your-service.example.com/hooks/retrieval-os",
+  "events": ["deployment.status_changed", "eval.regression_detected"],
+  "description": "Slack alerting hook",
+  "is_active": true,
+  "created_at": "2026-02-25T12:00:00Z",
+  "updated_at": "2026-02-25T12:00:00Z"
+}
+```
+
+Note: `secret` is never returned in responses.
+
+---
+
+### `GET /v1/webhooks`
+
+List all subscriptions.
+
+**Query parameters:**
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `offset` | int | 0 | Number of results to skip. |
+| `limit` | int | 50 | Results per page. Max 200. |
+
+**Response 200:**
+
+```json
+{
+  "items": [ /* WebhookSubscriptionResponse objects */ ],
+  "total": 3
+}
+```
+
+---
+
+### `GET /v1/webhooks/{webhook_id}`
+
+Get a single subscription.
+
+**Response 200:** `WebhookSubscriptionResponse`
+
+**Error:** 404 if not found.
+
+---
+
+### `DELETE /v1/webhooks/{webhook_id}`
+
+Delete a subscription. Events will no longer be delivered to its URL.
+
+**Response:** 204 No Content.
+
+**Error:** 404 if not found.
+
+---
+
+### Webhook payload format
+
+Every outbound request is a `POST` with `Content-Type: application/json`:
+
+```json
+{
+  "event": "deployment.status_changed",
+  "timestamp": "2026-02-25T12:05:00Z",
+  "data": {
+    "deployment_id": "018e7a2c-0000-7000-c345-678901abcdef",
+    "plan_name": "my-docs",
+    "status": "ROLLED_BACK",
+    "reason": "recall@5 0.5100 < threshold 0.7500",
+    "triggered_by": "watchdog"
+  }
+}
+```
+
+### HMAC-SHA256 signature verification
+
+When a `secret` is configured, the request includes:
+
+```
+X-Retrieval-OS-Signature: sha256=<hex_digest>
+```
+
+The digest is computed over the raw JSON request body:
+
+```python
+import hashlib, hmac
+
+def verify(secret: str, body: bytes, header: str) -> bool:
+    expected = "sha256=" + hmac.new(
+        secret.encode(), body, hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(expected, header)
+```
+
+### Delivery behaviour
+
+- Delivery is fire-and-forget — the sending request is never blocked.
+- Up to 3 attempts are made per event per subscription.
+- Retries use exponential back-off: 1s, 2s, 4s.
+- HTTP 5xx responses and network errors trigger a retry. 4xx responses do not.
+- Failed deliveries after all retries are silently dropped (check your endpoint logs).
+
+---
+
+## Ingestion
+
+The ingestion API accepts documents, chunks them by word boundary, embeds each chunk, and upserts the vectors into the plan's Qdrant collection. All work is performed asynchronously by a background job runner.
+
+### `POST /v1/plans/{plan_name}/ingest`
+
+Submit a batch ingestion job. Returns immediately with status `QUEUED`.
+
+**Inline documents:**
+
+```json
+{
+  "plan_version": 1,
+  "documents": [
+    {
+      "id": "doc-001",
+      "content": "Retrieval augmented generation (RAG) is a technique...",
+      "metadata": {"source": "rag-intro.pdf", "page": 1}
+    },
+    {
+      "id": "doc-002",
+      "content": "Vector databases store high-dimensional embeddings...",
+      "metadata": {"source": "vector-db-primer.pdf", "page": 1}
+    }
+  ],
+  "chunk_size": 512,
+  "overlap": 64,
+  "created_by": "alice"
+}
+```
+
+**S3 JSONL source:**
+
+```json
+{
+  "plan_version": 1,
+  "source_uri": "s3://my-bucket/datasets/docs-v1.jsonl",
+  "chunk_size": 256,
+  "overlap": 32,
+  "created_by": "pipeline-bot"
+}
+```
+
+Each line in the JSONL file must be: `{"id": "...", "content": "...", "metadata": {}}`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `plan_version` | int | Yes | Plan version whose Qdrant collection to populate. Must exist. |
+| `documents` | list | One of | Inline document list. Mutually exclusive with `source_uri`. |
+| `source_uri` | string | One of | S3 URI of a JSONL file. Mutually exclusive with `documents`. |
+| `chunk_size` | int | No | Max words per chunk. Range: 16–4096. Default: 512. |
+| `overlap` | int | No | Word overlap between consecutive chunks. Must be < `chunk_size`. Default: 64. |
+| `created_by` | string | No | Identity of submitter. |
+
+**Response 202:**
+
+```json
+{
+  "id": "018e7a2c-2222-7000-e567-890123abcdef",
+  "plan_name": "my-docs",
+  "plan_version": 1,
+  "source_uri": null,
+  "chunk_size": 512,
+  "overlap": 64,
+  "status": "QUEUED",
+  "total_docs": null,
+  "total_chunks": null,
+  "indexed_chunks": null,
+  "failed_chunks": null,
+  "error_message": null,
+  "created_at": "2026-02-25T12:00:00Z",
+  "started_at": null,
+  "completed_at": null,
+  "created_by": "alice"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `status` | string | `QUEUED`, `RUNNING`, `COMPLETED`, or `FAILED`. |
+| `total_docs` | int\|null | Total documents processed. Populated when COMPLETED. |
+| `total_chunks` | int\|null | Total chunks generated across all documents. |
+| `indexed_chunks` | int\|null | Chunks successfully upserted to Qdrant. |
+| `failed_chunks` | int\|null | Chunks that failed to embed or upsert. |
+| `error_message` | string\|null | Set if the job reaches FAILED status. |
+| `started_at` | timestamp\|null | When the background runner claimed the job. |
+| `completed_at` | timestamp\|null | When the job reached COMPLETED or FAILED. |
+
+**Error responses:**
+
+| Status | Cause |
+|---|---|
+| 404 | Plan not found or archived. |
+| 404 | Specified `plan_version` not found. |
+| 422 | Both or neither of `documents` / `source_uri` provided, or `overlap >= chunk_size`. |
+
+---
+
+### `GET /v1/plans/{plan_name}/ingest`
+
+List ingestion jobs for a plan, newest first.
+
+**Query parameters:** `offset` (default 0), `limit` (default 50, max 200).
+
+**Response 200:**
+
+```json
+{
+  "items": [ /* IngestionJobResponse objects */ ],
+  "total": 12
+}
+```
+
+---
+
+### `GET /v1/plans/{plan_name}/ingest/{job_id}`
+
+Get a single ingestion job.
+
+**Response 200:** `IngestionJobResponse`
+
+**Error:** 404 if not found or if the job belongs to a different plan.
+
+---
+
+### Chunking behaviour
+
+Documents are split on word boundaries (whitespace-delimited tokens):
+
+- A document with ≤ `chunk_size` words produces a single chunk.
+- Longer documents produce overlapping windows: chunk N starts `chunk_size - overlap` words after chunk N-1.
+- Each chunk inherits the document's `metadata` plus a `chunk_index` field.
+- Chunks are embedded in batches using the plan version's embedding config.
+- The Qdrant collection is auto-created on the first ingestion if it doesn't exist.
 
 ---
 

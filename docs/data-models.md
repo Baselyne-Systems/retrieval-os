@@ -151,81 +151,184 @@ Phase 7 aggregates `usage_records` into `cost_entries` hourly.
 
 ---
 
-## Future Tables (Phase 5+)
+## `lineage_artifacts`
 
-### `lineage_artifacts` (Phase 5)
+Tracks dataset snapshots, embedding artifacts, and index artifacts as nodes in the lineage DAG.
 
-Tracks dataset snapshots, embedding artifacts, and index artifacts.
+| Column | Type | Nullable | Default | Description |
+|---|---|---|---|---|
+| `id` | UUID | No | UUIDv7 | Primary key. |
+| `artifact_type` | VARCHAR(50) | No | — | One of: `DATASET_SNAPSHOT`, `EMBEDDING_ARTIFACT`, `INDEX_ARTIFACT`. |
+| `name` | VARCHAR(255) | No | — | Human-readable name. |
+| `version` | VARCHAR(100) | No | — | Semantic version or git SHA. |
+| `storage_uri` | TEXT | No | — | `s3://bucket/path` or `qdrant://collection`. Unique per artifact. |
+| `content_hash` | CHAR(64) | Yes | `NULL` | SHA-256 of artifact bytes (populated when available). |
+| `metadata` | JSONB | Yes | `NULL` | Type-specific metadata (e.g. chunk count, vector dimensions). |
+| `created_at` | TIMESTAMPTZ | No | — | Registration timestamp. |
+| `created_by` | VARCHAR(255) | No | — | Identity of registrar. |
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | UUID | PK |
-| `artifact_type` | VARCHAR | `DATASET_SNAPSHOT`, `EMBEDDING_ARTIFACT`, `INDEX_ARTIFACT` |
-| `name` | VARCHAR(255) | Human-readable name |
-| `version` | VARCHAR(100) | Semantic version or git SHA |
-| `storage_uri` | TEXT | `s3://bucket/path` or `qdrant://collection` |
-| `content_hash` | CHAR(64) | SHA-256 of artifact bytes (populated on registration) |
-| `metadata` | JSONB | Type-specific metadata (chunk count, dimension count, etc.) |
-| `created_at` | TIMESTAMPTZ | — |
-| `created_by` | VARCHAR(255) | — |
+**Indexes:**
+- `idx_lineage_artifacts_uri` — UNIQUE on `storage_uri`
+- `idx_lineage_artifacts_type` — on `artifact_type`
 
-### `lineage_edges` (Phase 5)
+---
+
+## `lineage_edges`
 
 DAG edges between artifacts.
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | UUID | PK |
-| `parent_artifact_id` | UUID | FK → `lineage_artifacts.id` |
-| `child_artifact_id` | UUID | FK → `lineage_artifacts.id` |
-| `relationship` | VARCHAR(50) | `produced_from`, `derived_from`, `deployed_as` |
-| `created_at` | TIMESTAMPTZ | — |
+| Column | Type | Nullable | Default | Description |
+|---|---|---|---|---|
+| `id` | UUID | No | UUIDv7 | Primary key. |
+| `parent_artifact_id` | UUID | No | — | FK → `lineage_artifacts.id`. |
+| `child_artifact_id` | UUID | No | — | FK → `lineage_artifacts.id`. |
+| `relationship` | VARCHAR(50) | No | — | One of: `produced_from`, `derived_from`, `deployed_as`. |
+| `created_at` | TIMESTAMPTZ | No | — | Edge creation timestamp. |
 
-Cycles are prevented at the service layer by running an ancestor query before any edge insert.
+**Constraints:**
+- `uq_lineage_edge` — UNIQUE (`parent_artifact_id`, `child_artifact_id`, `relationship`) — prevents duplicate edges.
 
-### `eval_jobs` (Phase 6)
+Cycles are prevented at the service layer: an ancestor query is run before any edge insert and raises `ConflictError` if a cycle would be created.
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | UUID | PK |
-| `plan_name` | VARCHAR(255) | — |
-| `plan_version` | INTEGER | — |
-| `status` | VARCHAR(50) | `QUEUED`, `RUNNING`, `COMPLETED`, `FAILED` |
-| `ground_truth_uri` | TEXT | S3 URI to JSONL ground truth file |
-| `sample_count` | INTEGER | Number of queries to evaluate |
-| `created_at` | TIMESTAMPTZ | — |
-| `started_at` | TIMESTAMPTZ | Set when RUNNING |
-| `completed_at` | TIMESTAMPTZ | Set when COMPLETED/FAILED |
-| `error` | TEXT | Failure reason if FAILED |
+---
 
-### `eval_runs` (Phase 6)
+## `eval_jobs`
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | UUID | PK |
-| `eval_job_id` | UUID | FK → `eval_jobs.id` |
-| `plan_name` | VARCHAR(255) | — |
-| `plan_version` | INTEGER | — |
-| `metrics` | JSONB | `{"recall@5": 0.72, "mrr": 0.61, "ndcg@10": 0.58, ...}` |
-| `sample_count` | INTEGER | — |
-| `duration_seconds` | FLOAT | — |
-| `completed_at` | TIMESTAMPTZ | — |
+Tracks evaluation runs against a plan version. Each job scores retrieval quality using a JSONL ground-truth file and writes metrics to `eval_runs`.
 
-### `cost_entries` (Phase 7)
+| Column | Type | Nullable | Default | Description |
+|---|---|---|---|---|
+| `id` | UUID | No | UUIDv7 | Primary key. |
+| `plan_name` | VARCHAR(255) | No | — | Plan being evaluated. |
+| `plan_version` | INTEGER | No | — | Plan version being evaluated. |
+| `status` | VARCHAR(50) | No | `'QUEUED'` | `QUEUED`, `RUNNING`, `COMPLETED`, or `FAILED`. |
+| `ground_truth_uri` | TEXT | No | — | S3 URI of JSONL ground-truth file. Each line: `{"query": "...", "relevant_ids": [...]}`. |
+| `sample_count` | INTEGER | No | — | Number of queries to evaluate (sampled from ground truth). |
+| `recall_at_5` | FLOAT | Yes | `NULL` | Recall@5 metric. Populated on COMPLETED. |
+| `mrr` | FLOAT | Yes | `NULL` | Mean Reciprocal Rank. |
+| `ndcg_at_10` | FLOAT | Yes | `NULL` | NDCG@10. |
+| `total_queries` | INTEGER | Yes | `NULL` | Number of queries executed. |
+| `failed_queries` | INTEGER | Yes | `NULL` | Queries that raised exceptions during eval. |
+| `regression_detected` | BOOLEAN | No | `false` | True if recall degraded vs. the previous completed eval for this plan. |
+| `created_at` | TIMESTAMPTZ | No | — | Job submission timestamp. |
+| `started_at` | TIMESTAMPTZ | Yes | `NULL` | When the background runner claimed the job. |
+| `completed_at` | TIMESTAMPTZ | Yes | `NULL` | When the job reached COMPLETED or FAILED. |
+| `error_message` | TEXT | Yes | `NULL` | Failure reason if FAILED. |
+| `created_by` | VARCHAR(255) | Yes | `NULL` | Identity of submitter. |
 
-Hourly aggregation of `usage_records`.
+**Indexes:**
+- `idx_eval_jobs_plan` — on (`plan_name`, `plan_version`, `created_at`)
+- `idx_eval_jobs_status` — on (`status`, `created_at`) — for the background job-runner poll query
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | UUID | PK |
-| `plan_name` | VARCHAR(255) | — |
-| `plan_version` | INTEGER | — |
-| `window_start` | TIMESTAMPTZ | Truncated to hour |
-| `query_count` | INTEGER | — |
-| `cache_hit_count` | INTEGER | — |
-| `total_chars` | BIGINT | Sum of query_chars |
-| `estimated_cost_usd` | FLOAT | Computed from model_pricing |
-| `created_at` | TIMESTAMPTZ | When this aggregate was computed |
+---
+
+## `cost_entries`
+
+Hourly aggregation of `usage_records`. Written by the `cost_aggregator` background loop.
+
+| Column | Type | Nullable | Default | Description |
+|---|---|---|---|---|
+| `id` | UUID | No | UUIDv7 | Primary key. |
+| `plan_name` | VARCHAR(255) | No | — | Plan name. |
+| `plan_version` | INTEGER | No | — | Plan version. |
+| `window_start` | TIMESTAMPTZ | No | — | Hour boundary (`date_trunc('hour', ...)`). |
+| `query_count` | INTEGER | No | — | Total queries in the window. |
+| `cache_hit_count` | INTEGER | No | — | Cache hits in the window. |
+| `total_chars` | BIGINT | No | — | Sum of `usage_records.query_chars`. |
+| `estimated_cost_usd` | FLOAT | No | — | Estimated cost based on model pricing rules. |
+| `created_at` | TIMESTAMPTZ | No | — | When this aggregate was computed. |
+
+**Constraints:**
+- `uq_cost_entry_window` — UNIQUE (`plan_name`, `plan_version`, `window_start`) — makes aggregation idempotent.
+
+---
+
+## `tenants`
+
+Tenants are logical isolation units. Every API request authenticated with an API key is scoped to a tenant.
+
+| Column | Type | Nullable | Default | Description |
+|---|---|---|---|---|
+| `id` | UUID | No | UUIDv7 | Primary key. |
+| `name` | VARCHAR(255) | No | — | Globally unique tenant name. |
+| `description` | TEXT | No | `''` | Free-text description. |
+| `is_active` | BOOLEAN | No | `true` | Inactive tenants are rejected at auth. |
+| `rate_limit_rpm` | INTEGER | No | `60` | Max requests per minute (Redis sliding-window). |
+| `created_at` | TIMESTAMPTZ | No | — | Creation timestamp. |
+| `updated_at` | TIMESTAMPTZ | No | — | Last update timestamp. |
+
+**Indexes:**
+- `idx_tenants_name` — UNIQUE on `name`
+
+---
+
+## `api_keys`
+
+Hashed API keys for tenant authentication.
+
+| Column | Type | Nullable | Default | Description |
+|---|---|---|---|---|
+| `id` | UUID | No | UUIDv7 | Primary key. |
+| `tenant_id` | UUID | No | — | FK → `tenants.id` ON DELETE CASCADE. |
+| `key_hash` | CHAR(64) | No | — | SHA-256 hex digest of the raw API key. The raw key is never stored. |
+| `description` | VARCHAR(255) | Yes | `NULL` | Human-readable label (e.g. `"CI pipeline key"`). |
+| `is_active` | BOOLEAN | No | `true` | Inactive keys are rejected at auth. |
+| `last_used_at` | TIMESTAMPTZ | Yes | `NULL` | Updated on each authenticated request. |
+| `created_at` | TIMESTAMPTZ | No | — | Creation timestamp. |
+
+**Indexes:**
+- `idx_api_keys_key_hash` — UNIQUE on `key_hash` — supports O(1) lookup at auth time
+- `idx_api_keys_tenant_id` — on `tenant_id`
+
+---
+
+## `webhook_subscriptions`
+
+Outbound HTTP event subscriptions. Each row registers a URL to receive signed event payloads.
+
+| Column | Type | Nullable | Default | Description |
+|---|---|---|---|---|
+| `id` | VARCHAR(36) | No | UUIDv7 | Primary key. |
+| `url` | VARCHAR(2048) | No | — | Target HTTP(S) URL. |
+| `events` | JSON | No | `[]` | List of event type strings to match. Empty = all events. |
+| `secret` | TEXT | Yes | `NULL` | Shared secret for HMAC-SHA256 signing. Never returned by the API. |
+| `description` | TEXT | Yes | `NULL` | Human-readable label. |
+| `is_active` | BOOLEAN | No | `true` | Inactive subscriptions receive no deliveries. |
+| `created_at` | TIMESTAMPTZ | No | — | Registration timestamp. |
+| `updated_at` | TIMESTAMPTZ | No | — | Last update timestamp. |
+
+**Indexes:**
+- `idx_webhook_subscriptions_is_active` — on `is_active` — for the active-subscription query on each event dispatch
+
+---
+
+## `ingestion_jobs`
+
+Tracks document ingestion jobs. Each job chunks, embeds, and upserts documents into the plan's vector index.
+
+| Column | Type | Nullable | Default | Description |
+|---|---|---|---|---|
+| `id` | VARCHAR(36) | No | UUIDv7 | Primary key. |
+| `plan_name` | VARCHAR(255) | No | — | Target plan. |
+| `plan_version` | INTEGER | No | — | Target plan version whose index is populated. |
+| `source_uri` | TEXT | Yes | `NULL` | S3 URI of a JSONL source file. Null if documents were provided inline. |
+| `document_payload` | JSON | Yes | `NULL` | Inline document list serialised as JSON. Null if `source_uri` is set. |
+| `chunk_size` | INTEGER | No | 512 | Max words per chunk. |
+| `overlap` | INTEGER | No | 64 | Word overlap between consecutive chunks. |
+| `status` | VARCHAR(50) | No | `'QUEUED'` | `QUEUED`, `RUNNING`, `COMPLETED`, or `FAILED`. |
+| `total_docs` | INTEGER | Yes | `NULL` | Total documents processed. |
+| `total_chunks` | INTEGER | Yes | `NULL` | Total chunks generated. |
+| `indexed_chunks` | INTEGER | Yes | `NULL` | Chunks successfully upserted to Qdrant. |
+| `failed_chunks` | INTEGER | Yes | `NULL` | Chunks that failed to embed or upsert. |
+| `error_message` | TEXT | Yes | `NULL` | Set if status is FAILED. |
+| `created_at` | TIMESTAMPTZ | No | — | Job submission timestamp. |
+| `started_at` | TIMESTAMPTZ | Yes | `NULL` | When the background runner claimed the job. |
+| `completed_at` | TIMESTAMPTZ | Yes | `NULL` | When the job finished. |
+| `created_by` | VARCHAR(255) | Yes | `NULL` | Identity of submitter. |
+
+**Indexes:**
+- `idx_ingestion_jobs_status_created` — on (`status`, `created_at`) — for the background job-runner poll query (SELECT FOR UPDATE SKIP LOCKED)
+- `idx_ingestion_jobs_plan` — on (`plan_name`, `created_at`)
 
 ---
 

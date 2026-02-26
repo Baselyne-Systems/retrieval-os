@@ -147,9 +147,34 @@ OTEL_ENABLED=false
 
 ---
 
+## Auth & Rate Limiting
+
+| Variable | Type | Default | Description |
+|---|---|---|---|
+| `AUTH_ENABLED` | bool | `false` | Enable API key authentication. When `true`, every request must include a valid key in the header specified by `API_KEY_HEADER`. |
+| `API_KEY_HEADER` | string | `X-API-Key` | HTTP header name for the API key. |
+| `RATE_LIMIT_ENABLED` | bool | `false` | Enable per-tenant sliding-window rate limiting via Redis. Requires `AUTH_ENABLED=true`. |
+| `RATE_LIMIT_DEFAULT_RPM` | int | `60` | Default max requests per minute per tenant. Overridden per-tenant by the `rate_limit_rpm` field on the `Tenant` record. |
+
+**Notes:**
+
+- Auth and rate limiting are disabled by default for local development. Always enable `AUTH_ENABLED=true` in staging and production.
+- The API key is hashed with SHA-256 on write; only the hash is stored. There is no way to retrieve a raw key after creation.
+- Rate limit state is stored in Redis as a sorted set (`ros:ratelimit:{tenant_id}`). Entries expire automatically after 1 minute.
+
+---
+
+## Optional External API Keys
+
+| Variable | Type | Default | Description |
+|---|---|---|---|
+| `COHERE_API_KEY` | string | `null` | Cohere API key. Required only when using the `cohere` reranker in a plan's `reranker` field (e.g. `cohere:rerank-english-v3.0`). |
+
+---
+
 ## Background Task Intervals
 
-These control how often each asyncio background loop runs. Adjust based on your traffic volume and latency requirements.
+These control how often each asyncio background loop runs. All five loops are started in the FastAPI lifespan and run indefinitely until the process shuts down.
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
@@ -157,12 +182,15 @@ These control how often each asyncio background loop runs. Adjust based on your 
 | `ROLLOUT_STEPPER_INTERVAL_SECONDS` | int | `10` | How often the rollout stepper advances `ROLLING_OUT` deployments by one step. |
 | `EVAL_JOB_POLL_INTERVAL_SECONDS` | int | `5` | How often the eval job runner polls for `QUEUED` eval jobs. |
 | `COST_AGGREGATOR_INTERVAL_SECONDS` | int | `3600` | How often usage records are aggregated into hourly cost entries. |
+| `INGESTION_JOB_POLL_INTERVAL_SECONDS` | int | `5` | How often the ingestion job runner polls for `QUEUED` ingestion jobs. |
 
 **Tuning notes:**
 
+- `ROLLBACK_WATCHDOG_INTERVAL_SECONDS`: The watchdog compares the latest completed eval's metrics against each deployment's thresholds. Lowering this to 15s in production gives faster auto-rollback response. The watchdog has no cost beyond a few DB reads per cycle.
 - `ROLLOUT_STEPPER_INTERVAL_SECONDS` is the granularity of gradual rollouts. If a deployment has `rollout_step_interval_seconds=300` (5 min), the stepper will only advance it when the loop runs AND 5 minutes have elapsed since the last step. Setting this to 60s gives 1-minute precision on 5-minute steps.
 - `EVAL_JOB_POLL_INTERVAL_SECONDS` only affects how quickly a newly-queued job starts. 5s is aggressive; 30s is reasonable for lower-volume setups.
-- `COST_AGGREGATOR_INTERVAL_SECONDS`: 3600 (hourly) is correct for Phase 7. Real-time cost dashboards read from `usage_records` directly.
+- `COST_AGGREGATOR_INTERVAL_SECONDS`: 3600 (hourly) is standard. Real-time cost dashboards read from `usage_records` directly.
+- `INGESTION_JOB_POLL_INTERVAL_SECONDS`: At 5s, a new job starts within 5 seconds of submission. For high-throughput pipelines, consider running multiple API replicas — each replica runs its own job runner, and `SELECT FOR UPDATE SKIP LOCKED` ensures no job is processed twice.
 
 ---
 
@@ -200,6 +228,8 @@ S3_BUCKET_NAME=retrieval-os-staging
 QDRANT_HOST=qdrant.staging.internal
 QDRANT_API_KEY=...
 OTEL_ENDPOINT=http://otel-collector.staging.internal:4317
+AUTH_ENABLED=true
+RATE_LIMIT_ENABLED=true
 ```
 
 ### Production
@@ -219,7 +249,11 @@ S3_BUCKET_NAME=retrieval-os-prod
 QDRANT_HOST=qdrant.prod.internal
 QDRANT_API_KEY=...
 OTEL_ENDPOINT=http://otel-collector.prod.internal:4317
+AUTH_ENABLED=true
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_DEFAULT_RPM=120
 ROLLBACK_WATCHDOG_INTERVAL_SECONDS=15
+# COHERE_API_KEY=...  # only needed if any plan uses reranker: "cohere:..."
 ```
 
 ---
