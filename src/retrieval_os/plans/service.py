@@ -1,4 +1,4 @@
-"""Business logic for the Plans domain."""
+"""Business logic for the Projects domain."""
 
 from datetime import UTC, datetime
 
@@ -10,31 +10,32 @@ from retrieval_os.core.exceptions import (
     AppValidationError,
     ConflictError,
     DuplicateConfigError,
-    PlanNotFoundError,
+    IndexConfigNotFoundError,
+    ProjectNotFoundError,
 )
 from retrieval_os.core.ids import uuid7
 from retrieval_os.core.schemas.pagination import CursorPage
-from retrieval_os.plans.models import PlanVersion, RetrievalPlan
-from retrieval_os.plans.repository import plan_repo
+from retrieval_os.plans.models import IndexConfig, Project
+from retrieval_os.plans.repository import project_repo
 from retrieval_os.plans.schemas import (
-    ClonePlanRequest,
-    CreatePlanRequest,
-    CreateVersionRequest,
-    PlanResponse,
-    PlanVersionResponse,
+    CloneProjectRequest,
+    CreateIndexConfigRequest,
+    CreateProjectRequest,
+    IndexConfigResponse,
+    ProjectResponse,
     decode_cursor,
     encode_cursor,
 )
 from retrieval_os.plans.validators import compute_config_hash, validate_plan_config
 
 
-async def create_plan(
+async def create_project(
     session: AsyncSession,
-    request: CreatePlanRequest,
-) -> PlanResponse:
+    request: CreateProjectRequest,
+) -> ProjectResponse:
     # 1. Name uniqueness
-    if await plan_repo.get_by_name(session, request.name):
-        raise ConflictError(f"A plan named '{request.name}' already exists")
+    if await project_repo.get_by_name(session, request.name):
+        raise ConflictError(f"A project named '{request.name}' already exists")
 
     # 2. Validate config semantics
     config_dict = request.config.model_dump()
@@ -45,8 +46,8 @@ async def create_plan(
 
     now = datetime.now(UTC)
 
-    # 4. Persist plan
-    plan = RetrievalPlan(
+    # 4. Persist project
+    project = Project(
         id=uuid7(),
         name=request.name,
         description=request.description,
@@ -54,13 +55,13 @@ async def create_plan(
         updated_at=now,
         created_by=request.created_by,
     )
-    session.add(plan)
+    session.add(project)
     await session.flush()
 
-    # 5. Persist version 1
-    version = PlanVersion(
+    # 5. Persist index config version 1
+    index_config = IndexConfig(
         id=uuid7(),
-        plan_id=plan.id,
+        project_id=project.id,
         version=1,
         is_current=True,
         config_hash=config_hash,
@@ -68,79 +69,79 @@ async def create_plan(
         created_by=request.created_by,
         **config_dict,
     )
-    session.add(version)
+    session.add(index_config)
     await session.flush()
-    await session.refresh(plan)
+    await session.refresh(project)
 
     metrics.plans_total.inc()
-    metrics.plan_versions_total.labels(plan_name=plan.name).inc()
+    metrics.plan_versions_total.labels(plan_name=project.name).inc()
 
-    return PlanResponse.model_validate(plan)
-
-
-async def get_plan(session: AsyncSession, name: str) -> PlanResponse:
-    plan = await plan_repo.get_by_name(session, name)
-    if not plan:
-        raise PlanNotFoundError(f"Plan '{name}' not found")
-    return PlanResponse.model_validate(plan)
+    return ProjectResponse.model_validate(project)
 
 
-async def list_plans(
+async def get_project(session: AsyncSession, name: str) -> ProjectResponse:
+    project = await project_repo.get_by_name(session, name)
+    if not project:
+        raise ProjectNotFoundError(f"Project '{name}' not found")
+    return ProjectResponse.model_validate(project)
+
+
+async def list_projects(
     session: AsyncSession,
     cursor: str | None = None,
     limit: int = 20,
     include_archived: bool = False,
-) -> CursorPage[PlanResponse]:
+) -> CursorPage[ProjectResponse]:
     offset = decode_cursor(cursor) if cursor else 0
-    plans, total = await plan_repo.list_plans(
+    projects, total = await project_repo.list_projects(
         session, offset=offset, limit=limit, include_archived=include_archived
     )
-    next_offset = offset + len(plans)
+    next_offset = offset + len(projects)
     has_more = next_offset < total
     return CursorPage(
-        items=[PlanResponse.model_validate(p) for p in plans],
+        items=[ProjectResponse.model_validate(p) for p in projects],
         total=total,
         cursor=encode_cursor(next_offset) if has_more else None,
         has_more=has_more,
     )
 
 
-async def create_version(
+async def create_index_config(
     session: AsyncSession,
-    plan_name: str,
-    request: CreateVersionRequest,
-) -> PlanVersionResponse:
-    # 1. Plan must exist and not be archived
-    plan = await plan_repo.get_by_name(session, plan_name)
-    if not plan:
-        raise PlanNotFoundError(f"Plan '{plan_name}' not found")
-    if plan.is_archived:
-        raise ConflictError(f"Plan '{plan_name}' is archived and cannot be versioned")
+    project_name: str,
+    request: CreateIndexConfigRequest,
+) -> IndexConfigResponse:
+    # 1. Project must exist and not be archived
+    project = await project_repo.get_by_name(session, project_name)
+    if not project:
+        raise ProjectNotFoundError(f"Project '{project_name}' not found")
+    if project.is_archived:
+        raise ConflictError(f"Project '{project_name}' is archived and cannot be versioned")
 
     # 2. Validate
     config_dict = request.config.model_dump()
     validate_plan_config(config_dict)
 
-    # 3. Dedup by config hash (same retrieval behaviour = no-op)
+    # 3. Dedup by config hash
     config_hash = compute_config_hash(config_dict)
-    existing = await plan_repo.get_version_by_config_hash(session, plan.id, config_hash)
+    existing = await project_repo.get_index_config_by_config_hash(session, project.id, config_hash)
     if existing:
         raise DuplicateConfigError(
-            f"Version {existing.version} of '{plan_name}' already has this exact config",
+            f"Index config {existing.version} of '{project_name}' already has this exact config",
             detail={"existing_version": existing.version, "config_hash": config_hash},
         )
 
-    # 4. Serialised version number (locks plan row)
-    next_num = await plan_repo.get_next_version_number(session, plan)
+    # 4. Serialised version number (locks project row)
+    next_num = await project_repo.get_next_version_number(session, project)
 
-    # 5. Demote previous current version
-    await plan_repo.unset_current_version(session, plan.id)
+    # 5. Demote previous current index config
+    await project_repo.unset_current_index_config(session, project.id)
 
-    # 6. Create new version
+    # 6. Create new index config
     now = datetime.now(UTC)
-    version = PlanVersion(
+    index_config = IndexConfig(
         id=uuid7(),
-        plan_id=plan.id,
+        project_id=project.id,
         version=next_num,
         is_current=True,
         config_hash=config_hash,
@@ -149,61 +150,60 @@ async def create_version(
         **config_dict,
     )
     try:
-        version = await plan_repo.create_version(session, version)
+        index_config = await project_repo.create_index_config(session, index_config)
     except IntegrityError:
-        # Race condition: another concurrent request won; surface as duplicate
         raise DuplicateConfigError(
-            "Concurrent version creation conflict — please retry",
+            "Concurrent index config creation conflict — please retry",
             detail={"config_hash": config_hash},
         )
 
-    metrics.plan_versions_total.labels(plan_name=plan.name).inc()
+    metrics.plan_versions_total.labels(plan_name=project.name).inc()
 
-    return PlanVersionResponse.model_validate(version)
-
-
-async def list_versions(session: AsyncSession, plan_name: str) -> list[PlanVersionResponse]:
-    plan = await plan_repo.get_by_name(session, plan_name)
-    if not plan:
-        raise PlanNotFoundError(f"Plan '{plan_name}' not found")
-    versions = await plan_repo.list_versions(session, plan.id)
-    return [PlanVersionResponse.model_validate(v) for v in versions]
+    return IndexConfigResponse.model_validate(index_config)
 
 
-async def get_version(
-    session: AsyncSession, plan_name: str, version_num: int
-) -> PlanVersionResponse:
-    plan = await plan_repo.get_by_name(session, plan_name)
-    if not plan:
-        raise PlanNotFoundError(f"Plan '{plan_name}' not found")
-    version = await plan_repo.get_version(session, plan.id, version_num)
-    if not version:
-        from retrieval_os.core.exceptions import PlanVersionNotFoundError
-
-        raise PlanVersionNotFoundError(f"Version {version_num} of plan '{plan_name}' not found")
-    return PlanVersionResponse.model_validate(version)
+async def list_index_configs(session: AsyncSession, project_name: str) -> list[IndexConfigResponse]:
+    project = await project_repo.get_by_name(session, project_name)
+    if not project:
+        raise ProjectNotFoundError(f"Project '{project_name}' not found")
+    configs = await project_repo.list_index_configs(session, project.id)
+    return [IndexConfigResponse.model_validate(c) for c in configs]
 
 
-async def clone_plan(
+async def get_index_config(
+    session: AsyncSession, project_name: str, version_num: int
+) -> IndexConfigResponse:
+    project = await project_repo.get_by_name(session, project_name)
+    if not project:
+        raise ProjectNotFoundError(f"Project '{project_name}' not found")
+    config = await project_repo.get_index_config(session, project.id, version_num)
+    if not config:
+        raise IndexConfigNotFoundError(
+            f"Index config {version_num} of project '{project_name}' not found"
+        )
+    return IndexConfigResponse.model_validate(config)
+
+
+async def clone_project(
     session: AsyncSession,
     source_name: str,
-    request: ClonePlanRequest,
-) -> PlanResponse:
+    request: CloneProjectRequest,
+) -> ProjectResponse:
     # 1. Source must exist
-    source = await plan_repo.get_by_name(session, source_name)
+    source = await project_repo.get_by_name(session, source_name)
     if not source:
-        raise PlanNotFoundError(f"Plan '{source_name}' not found")
+        raise ProjectNotFoundError(f"Project '{source_name}' not found")
 
-    source_version = source.current_version
-    if not source_version:
-        raise AppValidationError(f"Plan '{source_name}' has no current version to clone")
+    source_config = source.current_index_config
+    if not source_config:
+        raise AppValidationError(f"Project '{source_name}' has no current index config to clone")
 
     # 2. New name must be free
-    if await plan_repo.get_by_name(session, request.new_name):
-        raise ConflictError(f"A plan named '{request.new_name}' already exists")
+    if await project_repo.get_by_name(session, request.new_name):
+        raise ConflictError(f"A project named '{request.new_name}' already exists")
 
     now = datetime.now(UTC)
-    new_plan = RetrievalPlan(
+    new_project = Project(
         id=uuid7(),
         name=request.new_name,
         description=request.description or source.description,
@@ -211,50 +211,41 @@ async def clone_plan(
         updated_at=now,
         created_by=request.created_by,
     )
-    session.add(new_plan)
+    session.add(new_project)
     await session.flush()
 
-    new_version = PlanVersion(
+    new_config = IndexConfig(
         id=uuid7(),
-        plan_id=new_plan.id,
+        project_id=new_project.id,
         version=1,
         is_current=True,
-        config_hash=source_version.config_hash,
+        config_hash=source_config.config_hash,
         created_at=now,
         created_by=request.created_by,
-        change_comment=f"Cloned from {source_name} v{source_version.version}",
-        embedding_provider=source_version.embedding_provider,
-        embedding_model=source_version.embedding_model,
-        embedding_dimensions=source_version.embedding_dimensions,
-        modalities=source_version.modalities,
-        embedding_batch_size=source_version.embedding_batch_size,
-        embedding_normalize=source_version.embedding_normalize,
-        index_backend=source_version.index_backend,
-        index_collection=source_version.index_collection,
-        distance_metric=source_version.distance_metric,
-        quantization=source_version.quantization,
-        top_k=source_version.top_k,
-        rerank_top_k=source_version.rerank_top_k,
-        reranker=source_version.reranker,
-        hybrid_alpha=source_version.hybrid_alpha,
-        metadata_filters=source_version.metadata_filters,
-        tenant_isolation_field=source_version.tenant_isolation_field,
-        cache_enabled=source_version.cache_enabled,
-        cache_ttl_seconds=source_version.cache_ttl_seconds,
-        max_tokens_per_query=source_version.max_tokens_per_query,
+        change_comment=f"Cloned from {source_name} v{source_config.version}",
+        embedding_provider=source_config.embedding_provider,
+        embedding_model=source_config.embedding_model,
+        embedding_dimensions=source_config.embedding_dimensions,
+        modalities=source_config.modalities,
+        embedding_batch_size=source_config.embedding_batch_size,
+        embedding_normalize=source_config.embedding_normalize,
+        index_backend=source_config.index_backend,
+        index_collection=source_config.index_collection,
+        distance_metric=source_config.distance_metric,
+        quantization=source_config.quantization,
     )
-    session.add(new_version)
+    session.add(new_config)
     await session.flush()
-    await session.refresh(new_plan)
+    await session.refresh(new_project)
 
     metrics.plans_total.inc()
-    metrics.plan_versions_total.labels(plan_name=new_plan.name).inc()
+    metrics.plan_versions_total.labels(plan_name=new_project.name).inc()
 
-    return PlanResponse.model_validate(new_plan)
+    return ProjectResponse.model_validate(new_project)
 
 
-async def archive_plan(session: AsyncSession, name: str) -> None:
-    plan = await plan_repo.get_by_name(session, name)
-    if not plan:
-        raise PlanNotFoundError(f"Plan '{name}' not found")
-    await plan_repo.archive(session, plan.id)
+async def archive_project(session: AsyncSession, name: str) -> None:
+    project = await project_repo.get_by_name(session, name)
+    if not project:
+        raise ProjectNotFoundError(f"Project '{name}' not found")
+    await project_repo.archive(session, project.id)

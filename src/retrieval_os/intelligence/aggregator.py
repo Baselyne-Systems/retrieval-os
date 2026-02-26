@@ -132,12 +132,12 @@ async def _get_plan_embedding(
     """Return (provider, model) for a plan version, or (None, None) if missing."""
     from sqlalchemy import select
 
-    from retrieval_os.plans.models import PlanVersion, RetrievalPlan
+    from retrieval_os.plans.models import IndexConfig, Project
 
     result = await session.execute(
-        select(PlanVersion.embedding_provider, PlanVersion.embedding_model)
-        .join(RetrievalPlan, PlanVersion.plan_id == RetrievalPlan.id)
-        .where(RetrievalPlan.name == plan_name, PlanVersion.version == plan_version)
+        select(IndexConfig.embedding_provider, IndexConfig.embedding_model)
+        .join(Project, IndexConfig.project_id == Project.id)
+        .where(Project.name == plan_name, IndexConfig.version == plan_version)
     )
     row = result.one_or_none()
     if row is None:

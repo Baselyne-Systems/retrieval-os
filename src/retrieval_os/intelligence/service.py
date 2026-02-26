@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from retrieval_os.core import metrics
 from retrieval_os.core.ids import uuid7
+from retrieval_os.deployments.models import Deployment, DeploymentStatus
 from retrieval_os.intelligence.models import ModelPricing
 from retrieval_os.intelligence.recommender import PlanStats, generate_recommendations
 from retrieval_os.intelligence.repository import intel_repo
@@ -22,7 +23,7 @@ from retrieval_os.intelligence.schemas import (
     Recommendation,
     RecommendationsResponse,
 )
-from retrieval_os.plans.models import PlanVersion, RetrievalPlan
+from retrieval_os.plans.models import IndexConfig, Project
 
 log = logging.getLogger(__name__)
 
@@ -145,33 +146,34 @@ async def get_recommendations(
     if plan_name and plan_name not in plan_names:
         plan_names.append(plan_name)
 
-    plan_configs: dict[str, PlanVersion] = {}
+    # Load active deployments with their index configs for plans that have usage
+    plan_stats: list[PlanStats] = []
     if plan_names:
         result = await session.execute(
-            select(PlanVersion, RetrievalPlan.name.label("rp_name"))
-            .join(RetrievalPlan, PlanVersion.plan_id == RetrievalPlan.id)
-            .where(RetrievalPlan.name.in_(plan_names), PlanVersion.is_current == True)  # noqa: E712
-        )
-        for row in result:
-            pv, rp_name = row
-            plan_configs[rp_name] = pv
-
-    # Build PlanStats for each plan
-    plan_stats: list[PlanStats] = []
-    for pname, pv in plan_configs.items():
-        row = summary_by_plan.get(pname, {})
-        plan_stats.append(
-            PlanStats(
-                plan_name=pname,
-                total_queries=row.get("total_queries") or 0,
-                cache_hits=row.get("cache_hits") or 0,
-                estimated_cost_usd=float(row.get("estimated_cost_usd") or 0.0),
-                cache_enabled=pv.cache_enabled,
-                top_k=pv.top_k,
-                embedding_provider=pv.embedding_provider,
-                embedding_model=pv.embedding_model,
+            select(Deployment, IndexConfig.embedding_provider, IndexConfig.embedding_model)
+            .join(IndexConfig, Deployment.index_config_id == IndexConfig.id)
+            .join(Project, IndexConfig.project_id == Project.id)
+            .where(
+                Project.name.in_(plan_names),
+                Deployment.status == DeploymentStatus.ACTIVE.value,
             )
         )
+        for row in result:
+            dep, emb_provider, emb_model = row
+            pname = dep.plan_name
+            cost_row = summary_by_plan.get(pname, {})
+            plan_stats.append(
+                PlanStats(
+                    plan_name=pname,
+                    total_queries=cost_row.get("total_queries") or 0,
+                    cache_hits=cost_row.get("cache_hits") or 0,
+                    estimated_cost_usd=float(cost_row.get("estimated_cost_usd") or 0.0),
+                    cache_enabled=dep.cache_enabled,
+                    top_k=dep.top_k,
+                    embedding_provider=emb_provider,
+                    embedding_model=emb_model,
+                )
+            )
 
     recs = generate_recommendations(plan_stats)
 

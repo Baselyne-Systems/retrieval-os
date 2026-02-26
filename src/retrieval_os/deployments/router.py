@@ -11,7 +11,7 @@ from retrieval_os.deployments.schemas import (
     RollbackRequest,
 )
 
-router = APIRouter(prefix="/v1/plans", tags=["deployments"])
+router = APIRouter(prefix="/v1/projects", tags=["deployments"])
 
 
 @router.post(

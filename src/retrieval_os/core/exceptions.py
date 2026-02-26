@@ -23,12 +23,20 @@ class NotFoundError(RetrievalOSError):
     error_code = "NOT_FOUND"
 
 
-class PlanNotFoundError(NotFoundError):
-    error_code = "PLAN_NOT_FOUND"
+class ProjectNotFoundError(NotFoundError):
+    error_code = "PROJECT_NOT_FOUND"
 
 
-class PlanVersionNotFoundError(NotFoundError):
-    error_code = "PLAN_VERSION_NOT_FOUND"
+# Backward-compat alias kept for any external callers
+PlanNotFoundError = ProjectNotFoundError
+
+
+class IndexConfigNotFoundError(NotFoundError):
+    error_code = "INDEX_CONFIG_NOT_FOUND"
+
+
+# Backward-compat alias
+PlanVersionNotFoundError = IndexConfigNotFoundError
 
 
 class DeploymentNotFoundError(NotFoundError):

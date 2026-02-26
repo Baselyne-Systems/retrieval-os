@@ -1,10 +1,9 @@
-"""Query Router — resolves plan config and dispatches to the retrieval executor.
+"""Query Router — resolves project config and dispatches to the retrieval executor.
 
 Design constraints:
 - NEVER reads Postgres on the hot path.
-- Plan config is served from Redis (key: ros:plan:{name}:current).
+- Serving config is served from Redis (key: ros:project:{name}:active).
 - On Redis miss, falls back to a single Postgres read and warms the cache.
-- Traffic splitting (Phase 4) will be handled here once Deployments exist.
 """
 
 from __future__ import annotations
@@ -14,9 +13,10 @@ import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from retrieval_os.core.exceptions import PlanNotFoundError
+from retrieval_os.core.exceptions import ProjectNotFoundError
 from retrieval_os.core.redis_client import get_redis
-from retrieval_os.plans.repository import plan_repo
+from retrieval_os.deployments.repository import deployment_repo
+from retrieval_os.plans.repository import project_repo
 from retrieval_os.serving.embed_router import embed_audio, embed_images
 from retrieval_os.serving.executor import RetrievedChunk, execute_retrieval
 from retrieval_os.serving.index_proxy import IndexHit, vector_search
@@ -27,11 +27,11 @@ _PLAN_CACHE_TTL = 30  # seconds; background loop refreshes this every 5 s
 
 
 def _plan_redis_key(name: str) -> str:
-    return f"ros:plan:{name}:current"
+    return f"ros:project:{name}:active"
 
 
 async def _load_plan_config(plan_name: str, db: AsyncSession) -> dict:
-    """Return plan config dict; check Redis first, fall back to Postgres."""
+    """Return serving config dict; check Redis first, fall back to Postgres."""
     redis = await get_redis()
     key = _plan_redis_key(plan_name)
 
@@ -40,33 +40,39 @@ async def _load_plan_config(plan_name: str, db: AsyncSession) -> dict:
         return json.loads(raw)
 
     # Cache miss — load from Postgres and warm Redis.
-    plan = await plan_repo.get_by_name(db, plan_name)
-    if not plan:
-        raise PlanNotFoundError(f"Plan '{plan_name}' not found")
-    if plan.is_archived:
-        raise PlanNotFoundError(f"Plan '{plan_name}' is archived")
+    project = await project_repo.get_by_name(db, plan_name)
+    if not project:
+        raise ProjectNotFoundError(f"Project '{plan_name}' not found")
+    if project.is_archived:
+        raise ProjectNotFoundError(f"Project '{plan_name}' is archived")
 
-    version = plan.current_version
-    if not version:
-        raise PlanNotFoundError(f"Plan '{plan_name}' has no current version")
+    # Load the active deployment
+    deployment = await deployment_repo.get_active_for_plan(db, plan_name)
+    if not deployment:
+        raise ProjectNotFoundError(f"Project '{plan_name}' has no active deployment")
+
+    # Load the index config
+    index_config = await project_repo.get_index_config_by_id(db, deployment.index_config_id)
+    if not index_config:
+        raise ProjectNotFoundError(f"Project '{plan_name}' index config not found")
 
     config = {
-        "plan_name": plan.name,
-        "version": version.version,
-        "embedding_provider": version.embedding_provider,
-        "embedding_model": version.embedding_model,
-        "embedding_normalize": version.embedding_normalize,
-        "embedding_batch_size": version.embedding_batch_size,
-        "index_backend": version.index_backend,
-        "index_collection": version.index_collection,
-        "distance_metric": version.distance_metric,
-        "top_k": version.top_k,
-        "reranker": version.reranker,
-        "rerank_top_k": version.rerank_top_k,
-        "metadata_filters": version.metadata_filters,
-        "cache_enabled": version.cache_enabled,
-        "cache_ttl_seconds": version.cache_ttl_seconds,
-        "hybrid_alpha": version.hybrid_alpha,
+        "project_name": plan_name,
+        "index_config_version": deployment.index_config_version,
+        "embedding_provider": index_config.embedding_provider,
+        "embedding_model": index_config.embedding_model,
+        "embedding_normalize": index_config.embedding_normalize,
+        "embedding_batch_size": index_config.embedding_batch_size,
+        "index_backend": index_config.index_backend,
+        "index_collection": index_config.index_collection,
+        "distance_metric": index_config.distance_metric,
+        "top_k": deployment.top_k,
+        "reranker": deployment.reranker,
+        "rerank_top_k": deployment.rerank_top_k,
+        "metadata_filters": deployment.metadata_filters,
+        "cache_enabled": deployment.cache_enabled,
+        "cache_ttl_seconds": deployment.cache_ttl_seconds,
+        "hybrid_alpha": deployment.hybrid_alpha,
     }
 
     try:
@@ -84,27 +90,27 @@ async def route_query(
     db: AsyncSession,
     metadata_filter_override: dict | None = None,
 ) -> tuple[list[RetrievedChunk], dict]:
-    """Resolve plan config and execute retrieval.
+    """Resolve project config and execute retrieval.
 
     Args:
-        plan_name:               Name of the retrieval plan.
+        plan_name:               Name of the project.
         query:                   The natural-language query string.
         db:                      AsyncSession — only used on Redis miss.
-        metadata_filter_override: Request-level filter merged over plan filters.
+        metadata_filter_override: Request-level filter merged over deployment filters.
 
     Returns:
         (chunks, info_dict) where info_dict carries version, cache_hit, etc.
     """
     config = await _load_plan_config(plan_name, db)
 
-    # Merge metadata filters: request-level overrides plan-level.
+    # Merge metadata filters: request-level overrides deployment-level.
     filters = config.get("metadata_filters") or {}
     if metadata_filter_override:
         filters = {**filters, **metadata_filter_override}
 
     chunks, cache_hit = await execute_retrieval(
         plan_name=plan_name,
-        version=config["version"],
+        version=config["index_config_version"],
         query=query,
         embedding_provider=config["embedding_provider"],
         embedding_model=config["embedding_model"],
@@ -124,7 +130,7 @@ async def route_query(
 
     info = {
         "plan_name": plan_name,
-        "version": config["version"],
+        "version": config["index_config_version"],
         "cache_hit": cache_hit,
         "result_count": len(chunks),
     }
@@ -140,13 +146,7 @@ async def route_image_query(
     image_bytes: bytes,
     db: AsyncSession,
 ) -> tuple[list[RetrievedChunk], dict]:
-    """Embed an image with CLIP and search the plan's vector index.
-
-    The plan must have ``embedding_provider = "clip"`` set.
-
-    Returns:
-        (chunks, info_dict) matching the shape of route_query.
-    """
+    """Embed an image with CLIP and search the project's vector index."""
     config = await _load_plan_config(plan_name, db)
 
     hits: list[IndexHit] = await _embed_and_search(
@@ -161,7 +161,7 @@ async def route_image_query(
     chunks = _hits_to_chunks(hits)
     return chunks, {
         "plan_name": plan_name,
-        "version": config["version"],
+        "version": config["index_config_version"],
         "cache_hit": False,
         "result_count": len(chunks),
     }
@@ -174,14 +174,7 @@ async def route_audio_query(
     db: AsyncSession,
     whisper_model_size: str = "base",
 ) -> tuple[list[RetrievedChunk], dict]:
-    """Transcribe audio with Whisper, embed the transcript, and search.
-
-    The plan's ``embedding_provider`` / ``embedding_model`` are used for the
-    text embedding step after transcription.
-
-    Returns:
-        (chunks, info_dict) matching the shape of route_query.
-    """
+    """Transcribe audio with Whisper, embed the transcript, and search."""
     config = await _load_plan_config(plan_name, db)
 
     hits = await _embed_and_search(
@@ -197,7 +190,7 @@ async def route_audio_query(
     chunks = _hits_to_chunks(hits)
     return chunks, {
         "plan_name": plan_name,
-        "version": config["version"],
+        "version": config["index_config_version"],
         "cache_hit": False,
         "result_count": len(chunks),
     }
@@ -211,7 +204,7 @@ async def _embed_and_search(
     vectors: list[list[float]],
     config: dict,
 ) -> list[IndexHit]:
-    """Run vector search with the first vector in *vectors* against plan config."""
+    """Run vector search with the first vector in *vectors* against project config."""
     return await vector_search(
         backend=config["index_backend"],
         collection=config["index_collection"],

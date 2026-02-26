@@ -1,10 +1,9 @@
-"""Pydantic request/response schemas for the Plans domain."""
+"""Pydantic request/response schemas for the Projects domain."""
 
 import base64
 import re
 import uuid
 from datetime import datetime
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -23,8 +22,8 @@ def _validate_slug(v: str, field_name: str = "name") -> str:
 # ── Request schemas ────────────────────────────────────────────────────────────
 
 
-class PlanVersionConfig(BaseModel):
-    """All fields that define the retrieval behaviour of a plan version."""
+class IndexConfigInput(BaseModel):
+    """Index-build fields that define how to embed and index documents."""
 
     # Embedding
     embedding_provider: str
@@ -40,29 +39,14 @@ class PlanVersionConfig(BaseModel):
     distance_metric: str = "cosine"
     quantization: str | None = None
 
-    # Retrieval
-    top_k: int = Field(10, gt=0)
-    rerank_top_k: int | None = Field(None, gt=0)
-    reranker: str | None = None
-    hybrid_alpha: float | None = Field(None, ge=0.0, le=1.0)
-
-    # Filters
-    metadata_filters: dict[str, Any] | None = None
-    tenant_isolation_field: str | None = None
-
-    # Cost / caching
-    cache_enabled: bool = True
-    cache_ttl_seconds: int = Field(3600, ge=0)
-    max_tokens_per_query: int | None = Field(None, gt=0)
-
     # Governance
     change_comment: str = ""
 
 
-class CreatePlanRequest(BaseModel):
+class CreateProjectRequest(BaseModel):
     name: str
     description: str = ""
-    config: PlanVersionConfig
+    config: IndexConfigInput
     created_by: str = "system"
 
     @field_validator("name")
@@ -71,12 +55,12 @@ class CreatePlanRequest(BaseModel):
         return _validate_slug(v, "name")
 
 
-class CreateVersionRequest(BaseModel):
-    config: PlanVersionConfig
+class CreateIndexConfigRequest(BaseModel):
+    config: IndexConfigInput
     created_by: str = "system"
 
 
-class ClonePlanRequest(BaseModel):
+class CloneProjectRequest(BaseModel):
     new_name: str
     description: str = ""
     created_by: str = "system"
@@ -90,7 +74,7 @@ class ClonePlanRequest(BaseModel):
 # ── Response schemas ───────────────────────────────────────────────────────────
 
 
-class PlanVersionResponse(BaseModel):
+class IndexConfigResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -109,25 +93,13 @@ class PlanVersionResponse(BaseModel):
     distance_metric: str
     quantization: str | None
 
-    top_k: int
-    rerank_top_k: int | None
-    reranker: str | None
-    hybrid_alpha: float | None
-
-    metadata_filters: dict[str, Any] | None
-    tenant_isolation_field: str | None
-
-    cache_enabled: bool
-    cache_ttl_seconds: int
-    max_tokens_per_query: int | None
-
     change_comment: str
     config_hash: str
     created_at: datetime
     created_by: str
 
 
-class PlanResponse(BaseModel):
+class ProjectResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -137,7 +109,7 @@ class PlanResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     created_by: str
-    current_version: PlanVersionResponse | None
+    current_index_config: IndexConfigResponse | None
 
 
 # ── Cursor pagination helpers ──────────────────────────────────────────────────

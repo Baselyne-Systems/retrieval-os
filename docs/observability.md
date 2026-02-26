@@ -80,8 +80,8 @@ rate(retrieval_os_embed_errors_total[5m]) / rate(retrieval_os_embed_requests_tot
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
-| `retrieval_os_plans_total` | Gauge | — | Total retrieval plans (incremented on create). |
-| `retrieval_os_plan_versions_total` | Gauge | `plan_name` | Total versions per plan. |
+| `retrieval_os_plans_total` | Gauge | — | Total projects (incremented on create). |
+| `retrieval_os_plan_versions_total` | Gauge | `plan_name` | Total IndexConfig versions per project. |
 
 ### Deployments
 

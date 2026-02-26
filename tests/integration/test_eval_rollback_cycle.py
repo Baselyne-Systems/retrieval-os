@@ -49,9 +49,9 @@ def _make_eval_job(
     )
 
 
-def _make_plan_version() -> SimpleNamespace:
+def _make_index_config() -> SimpleNamespace:
     return SimpleNamespace(
-        id="pv-001",
+        id="ic-001",
         version=1,
         embedding_provider="sentence_transformers",
         embedding_model="BAAI/bge-m3",
@@ -60,8 +60,6 @@ def _make_plan_version() -> SimpleNamespace:
         index_backend="qdrant",
         index_collection="my_docs_v1",
         distance_metric="cosine",
-        reranker=None,
-        rerank_top_k=None,
     )
 
 
@@ -101,7 +99,7 @@ def _make_deployment(
     return Deployment(
         id=dep_id,
         plan_name=plan_name,
-        plan_version=1,
+        index_config_version=1,
         status=DeploymentStatus.ACTIVE.value,
         traffic_weight=1.0,
         rollback_recall_threshold=recall_threshold,
@@ -124,7 +122,7 @@ class TestEvalRegressionDetection:
         job = _make_eval_job()
         session = MagicMock()
         session.execute = AsyncMock(
-            return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=_make_plan_version()))
+            return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=_make_index_config()))
         )
         fire_mock = AsyncMock()
         complete_mock = AsyncMock()
@@ -135,8 +133,8 @@ class TestEvalRegressionDetection:
                 new=AsyncMock(return_value=job),
             ),
             patch(
-                "retrieval_os.evaluations.service._load_plan_version",
-                new=AsyncMock(return_value=_make_plan_version()),
+                "retrieval_os.evaluations.service._load_index_config",
+                new=AsyncMock(return_value=_make_index_config()),
             ),
             patch(
                 "retrieval_os.evaluations.service.load_eval_dataset",
@@ -191,8 +189,8 @@ class TestEvalRegressionDetection:
                 new=AsyncMock(return_value=job),
             ),
             patch(
-                "retrieval_os.evaluations.service._load_plan_version",
-                new=AsyncMock(return_value=_make_plan_version()),
+                "retrieval_os.evaluations.service._load_index_config",
+                new=AsyncMock(return_value=_make_index_config()),
             ),
             patch(
                 "retrieval_os.evaluations.service.load_eval_dataset",
@@ -243,8 +241,8 @@ class TestEvalRegressionDetection:
                 new=AsyncMock(return_value=job),
             ),
             patch(
-                "retrieval_os.evaluations.service._load_plan_version",
-                new=AsyncMock(return_value=_make_plan_version()),
+                "retrieval_os.evaluations.service._load_index_config",
+                new=AsyncMock(return_value=_make_index_config()),
             ),
             patch(
                 "retrieval_os.evaluations.service.load_eval_dataset",
@@ -293,8 +291,8 @@ class TestEvalRegressionDetection:
                 new=AsyncMock(return_value=job),
             ),
             patch(
-                "retrieval_os.evaluations.service._load_plan_version",
-                new=AsyncMock(return_value=_make_plan_version()),
+                "retrieval_os.evaluations.service._load_index_config",
+                new=AsyncMock(return_value=_make_index_config()),
             ),
             patch(
                 "retrieval_os.evaluations.service.load_eval_dataset",
@@ -456,8 +454,8 @@ class TestEvalWatchdogCycle:
                 new=AsyncMock(return_value=job),
             ),
             patch(
-                "retrieval_os.evaluations.service._load_plan_version",
-                new=AsyncMock(return_value=_make_plan_version()),
+                "retrieval_os.evaluations.service._load_index_config",
+                new=AsyncMock(return_value=_make_index_config()),
             ),
             patch(
                 "retrieval_os.evaluations.service.load_eval_dataset",

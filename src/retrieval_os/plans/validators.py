@@ -1,7 +1,7 @@
-"""Semantic validation and config hashing for retrieval plan configs.
+"""Semantic validation and config hashing for index configs.
 
-Validation runs at write time (plan creation and new version), so the serving
-path can trust that any PlanVersion in the database is contractually valid.
+Validation runs at write time (project creation and new index config), so the
+serving path can trust that any IndexConfig in the database is contractually valid.
 """
 
 import hashlib
@@ -30,7 +30,7 @@ PROVIDER_MODALITIES: dict[str, set[str]] = {
 
 def validate_plan_config(config: dict[str, Any]) -> None:
     """
-    Validates plan config semantics. Raises AppValidationError with all
+    Validates index config semantics. Raises AppValidationError with all
     failures collected rather than stopping at the first one.
     """
     errors: list[str] = []
@@ -39,11 +39,7 @@ def validate_plan_config(config: dict[str, Any]) -> None:
     backend = config.get("index_backend", "")
     metric = config.get("distance_metric", "")
     modalities: list[str] = config.get("modalities", [])
-    top_k: int = config.get("top_k", 0)
-    rerank_top_k: int | None = config.get("rerank_top_k")
-    hybrid_alpha: float | None = config.get("hybrid_alpha")
     quantization: str | None = config.get("quantization")
-    cache_ttl: int = config.get("cache_ttl_seconds", 0)
 
     # Embedding provider
     if provider not in VALID_PROVIDERS:
@@ -80,21 +76,6 @@ def validate_plan_config(config: dict[str, Any]) -> None:
                     f"{sorted(unsupported)}; it supports {sorted(supported)}"
                 )
 
-    # top_k
-    if top_k < 1:
-        errors.append("top_k must be >= 1")
-
-    # rerank_top_k
-    if rerank_top_k is not None:
-        if rerank_top_k < 1:
-            errors.append("rerank_top_k must be >= 1")
-        elif rerank_top_k > top_k:
-            errors.append(f"rerank_top_k ({rerank_top_k}) must be <= top_k ({top_k})")
-
-    # hybrid_alpha
-    if hybrid_alpha is not None and not (0.0 <= hybrid_alpha <= 1.0):
-        errors.append("hybrid_alpha must be between 0.0 and 1.0")
-
     # quantization
     if quantization is not None and quantization not in VALID_QUANTIZATIONS:
         errors.append(
@@ -102,13 +83,9 @@ def validate_plan_config(config: dict[str, Any]) -> None:
             f"valid values: {sorted(VALID_QUANTIZATIONS)}"
         )
 
-    # cache_ttl_seconds
-    if cache_ttl < 0:
-        errors.append("cache_ttl_seconds must be >= 0")
-
     if errors:
         raise AppValidationError(
-            "Plan configuration validation failed",
+            "Index configuration validation failed",
             detail={"errors": errors},
         )
 
@@ -124,19 +101,13 @@ _HASH_FIELDS = (
     "index_collection",
     "distance_metric",
     "quantization",
-    "top_k",
-    "rerank_top_k",
-    "reranker",
-    "hybrid_alpha",
-    "metadata_filters",
 )
 
 
 def compute_config_hash(config: dict[str, Any]) -> str:
     """
-    SHA-256 of a canonical JSON subset of the config fields that define
-    retrieval behaviour. Two PlanVersions with the same hash are functionally
-    identical (cost config, caching, and comments are excluded).
+    SHA-256 of a canonical JSON subset of the index config fields.
+    Two IndexConfigs with the same hash are functionally identical build-time configs.
     """
     canonical: dict[str, Any] = {}
     for field in _HASH_FIELDS:

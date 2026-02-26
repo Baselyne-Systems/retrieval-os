@@ -2,7 +2,7 @@
 
 Pipeline per job:
   1. Claim next QUEUED job (SELECT FOR UPDATE SKIP LOCKED).
-  2. Load plan version config from Postgres.
+  2. Load index config from Postgres.
   3. Fetch raw documents from S3 (JSONL) or use inline payload.
   4. Chunk each document using the word-boundary chunker.
   5. Embed chunks in batches via embed_router.
@@ -34,7 +34,7 @@ from retrieval_os.lineage.models import (
     LineageEdge,
 )
 from retrieval_os.lineage.repository import lineage_repo
-from retrieval_os.plans.models import PlanVersion, RetrievalPlan
+from retrieval_os.plans.models import IndexConfig, Project
 from retrieval_os.serving.embed_router import embed_text
 from retrieval_os.serving.index_proxy import ensure_collection, upsert_vectors
 from retrieval_os.webhooks.delivery import fire_webhook_event
@@ -45,21 +45,23 @@ log = logging.getLogger(__name__)
 _EMBED_BATCH_SIZE = 50
 
 
-# ── Plan-version loader ────────────────────────────────────────────────────────
+# ── Index config loader ────────────────────────────────────────────────────────
 
 
-async def _load_plan_version(session: AsyncSession, plan_name: str, version: int) -> PlanVersion:
+async def _load_index_config(session: AsyncSession, project_name: str, version: int) -> IndexConfig:
     result = await session.execute(
-        select(PlanVersion)
-        .join(RetrievalPlan, PlanVersion.plan_id == RetrievalPlan.id)
-        .where(RetrievalPlan.name == plan_name, PlanVersion.version == version)
+        select(IndexConfig)
+        .join(Project, IndexConfig.project_id == Project.id)
+        .where(Project.name == project_name, IndexConfig.version == version)
     )
-    pv = result.scalar_one_or_none()
-    if pv is None:
-        from retrieval_os.core.exceptions import PlanVersionNotFoundError
+    ic = result.scalar_one_or_none()
+    if ic is None:
+        from retrieval_os.core.exceptions import IndexConfigNotFoundError
 
-        raise PlanVersionNotFoundError(f"Plan '{plan_name}' version {version} not found")
-    return pv
+        raise IndexConfigNotFoundError(
+            f"Project '{project_name}' index config version {version} not found"
+        )
+    return ic
 
 
 # ── S3 document loader ────────────────────────────────────────────────────────
@@ -88,7 +90,7 @@ async def _load_docs_from_s3(source_uri: str) -> list[dict]:
 async def _register_ingestion_lineage(
     session: AsyncSession,
     job: IngestionJob,
-    pv: PlanVersion,
+    ic: IndexConfig,
     total_chunks: int,
     indexed_chunks: int,
 ) -> None:
@@ -97,7 +99,7 @@ async def _register_ingestion_lineage(
 
     dataset_uri = job.source_uri or f"inline://{job.id}"
     embed_uri = f"embed://{job.id}"
-    index_uri = f"qdrant://{pv.index_collection}"
+    index_uri = f"qdrant://{ic.index_collection}"
 
     # Idempotent — skip if already registered (re-runs of same job)
     dataset_art = await lineage_repo.get_artifact_by_uri(session, dataset_uri)
@@ -107,8 +109,8 @@ async def _register_ingestion_lineage(
             LineageArtifact(
                 id=str(uuid7()),
                 artifact_type=ArtifactType.DATASET_SNAPSHOT.value,
-                name=f"{job.plan_name}-dataset-v{job.plan_version}",
-                version=str(job.plan_version),
+                name=f"{job.plan_name}-dataset-v{job.index_config_version}",
+                version=str(job.index_config_version),
                 storage_uri=dataset_uri,
                 content_hash=None,
                 artifact_metadata={
@@ -128,13 +130,13 @@ async def _register_ingestion_lineage(
             LineageArtifact(
                 id=str(uuid7()),
                 artifact_type=ArtifactType.EMBEDDING_ARTIFACT.value,
-                name=f"{job.plan_name}-embeddings-v{job.plan_version}",
-                version=str(job.plan_version),
+                name=f"{job.plan_name}-embeddings-v{job.index_config_version}",
+                version=str(job.index_config_version),
                 storage_uri=embed_uri,
                 content_hash=None,
                 artifact_metadata={
-                    "provider": pv.embedding_provider,
-                    "model": pv.embedding_model,
+                    "provider": ic.embedding_provider,
+                    "model": ic.embedding_model,
                     "indexed_chunks": indexed_chunks,
                 },
                 created_at=now,
@@ -149,13 +151,13 @@ async def _register_ingestion_lineage(
             LineageArtifact(
                 id=str(uuid7()),
                 artifact_type=ArtifactType.INDEX_ARTIFACT.value,
-                name=f"{job.plan_name}-index-v{job.plan_version}",
-                version=str(job.plan_version),
+                name=f"{job.plan_name}-index-v{job.index_config_version}",
+                version=str(job.index_config_version),
                 storage_uri=index_uri,
                 content_hash=None,
                 artifact_metadata={
-                    "backend": pv.index_backend,
-                    "collection": pv.index_collection,
+                    "backend": ic.index_backend,
+                    "collection": ic.index_collection,
                 },
                 created_at=now,
                 created_by=creator,
@@ -200,14 +202,15 @@ async def create_ingestion_job(
     plan_name: str,
     request: IngestRequest,
 ) -> IngestionJob:
-    """Validate the plan version exists, persist a QUEUED job, return it."""
-    await _load_plan_version(session, plan_name, request.plan_version)
+    """Validate the index config exists, persist a QUEUED job, return it."""
+    ic = await _load_index_config(session, plan_name, request.index_config_version)
 
     now = datetime.now(UTC)
     job = IngestionJob(
         id=str(uuid7()),
         plan_name=plan_name,
-        plan_version=request.plan_version,
+        index_config_id=ic.id,
+        index_config_version=request.index_config_version,
         source_uri=request.source_uri,
         document_payload=(
             [doc.model_dump() for doc in request.documents]
@@ -238,8 +241,8 @@ async def process_next_ingestion_job(session: AsyncSession) -> str | None:
     log.info("ingestion.job.started", extra={"job_id": job_id, "plan": job.plan_name})
 
     try:
-        # 1. Load plan version config
-        pv = await _load_plan_version(session, job.plan_name, job.plan_version)
+        # 1. Load index config
+        ic = await _load_index_config(session, job.plan_name, job.index_config_version)
 
         # 2. Load documents
         if job.source_uri:
@@ -266,7 +269,7 @@ async def process_next_ingestion_job(session: AsyncSession) -> str | None:
                             "doc_id": doc_id,
                             "chunk_idx": idx,
                             "plan_name": job.plan_name,
-                            "plan_version": job.plan_version,
+                            "index_config_version": job.index_config_version,
                             **metadata,
                         },
                     }
@@ -284,19 +287,18 @@ async def process_next_ingestion_job(session: AsyncSession) -> str | None:
             try:
                 vectors = await embed_text(
                     texts,
-                    provider=pv.embedding_provider,
-                    model=pv.embedding_model,
-                    normalize=pv.embedding_normalize,
-                    batch_size=pv.embedding_batch_size,
+                    provider=ic.embedding_provider,
+                    model=ic.embedding_model,
+                    normalize=ic.embedding_normalize,
+                    batch_size=ic.embedding_batch_size,
                 )
-                # Ensure the Qdrant collection exists before the first upsert,
-                # using the actual embedding dimension from the first batch.
+                # Ensure the Qdrant collection exists before the first upsert
                 if not collection_ensured and vectors:
                     await ensure_collection(
-                        backend=pv.index_backend,
-                        collection=pv.index_collection,
+                        backend=ic.index_backend,
+                        collection=ic.index_collection,
                         dimension=len(vectors[0]),
-                        distance=pv.distance_metric,
+                        distance=ic.distance_metric,
                     )
                     collection_ensured = True
                 points = [
@@ -304,8 +306,8 @@ async def process_next_ingestion_job(session: AsyncSession) -> str | None:
                     for c, v in zip(batch, vectors)
                 ]
                 await upsert_vectors(
-                    backend=pv.index_backend,
-                    collection=pv.index_collection,
+                    backend=ic.index_backend,
+                    collection=ic.index_collection,
                     points=points,
                 )
                 indexed_chunks += len(batch)
@@ -317,7 +319,7 @@ async def process_next_ingestion_job(session: AsyncSession) -> str | None:
                 )
 
         # 5. Register lineage
-        await _register_ingestion_lineage(session, job, pv, total_chunks, indexed_chunks)
+        await _register_ingestion_lineage(session, job, ic, total_chunks, indexed_chunks)
 
         # 6. Fire webhook if anything was indexed
         if indexed_chunks > 0:
@@ -326,7 +328,7 @@ async def process_next_ingestion_job(session: AsyncSession) -> str | None:
                 {
                     "job_id": job_id,
                     "plan_name": job.plan_name,
-                    "plan_version": job.plan_version,
+                    "index_config_version": job.index_config_version,
                     "indexed_chunks": indexed_chunks,
                     "failed_chunks": failed_chunks,
                 },

@@ -83,7 +83,7 @@ Content-Type: text/plain; version=0.0.4; charset=utf-8
 
 Execute a retrieval query. This is the hot path — P99 target < 200ms.
 
-**Path parameter:** `plan_name` — name of the retrieval plan (lowercase slug).
+**Path parameter:** `plan_name` — name of the project (lowercase slug).
 
 **Request body:**
 
@@ -100,7 +100,7 @@ Execute a retrieval query. This is the hot path — P99 target < 200ms.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `query` | string | Yes | Query text. Min 1 char, max 8192 chars. |
-| `metadata_filters` | object | No | Key-value filters merged over the plan's `metadata_filters`. Request-level values override plan-level values for matching keys. |
+| `metadata_filters` | object | No | Key-value filters merged over the deployment's `metadata_filters`. Request-level values override deployment-level values for matching keys. |
 
 **Response 200:**
 
@@ -127,8 +127,8 @@ Execute a retrieval query. This is the hot path — P99 target < 200ms.
 
 | Field | Type | Description |
 |---|---|---|
-| `plan_name` | string | Name of the plan that served the query. |
-| `version` | int | Plan version number used (the current deployed version). |
+| `plan_name` | string | Name of the project that served the query. |
+| `version` | int | Index config version number used (the active deployment's index_config_version). |
 | `cache_hit` | bool | Whether the result was served from the semantic query cache. |
 | `result_count` | int | Number of chunks returned. |
 | `results[].id` | string | The vector ID from Qdrant (payload field `id` if present, else Qdrant point ID). |
@@ -140,19 +140,19 @@ Execute a retrieval query. This is the hot path — P99 target < 200ms.
 
 | Status | error_code | Cause |
 |---|---|---|
-| 404 | `PLAN_NOT_FOUND` | No plan with this name, or plan is archived. |
+| 404 | `PROJECT_NOT_FOUND` | No project with this name, or project is archived. |
 | 503 | `EMBEDDING_PROVIDER_ERROR` | Embedding model unavailable or not installed. |
 | 503 | `INDEX_BACKEND_ERROR` | Qdrant unreachable or collection not found. |
 
 ---
 
-## Plans
+## Projects
 
-Plans are immutable versioned retrieval configurations. Every change to embedding or index config creates a new version. The current version is always the latest.
+Projects are the named containers for retrieval use cases. Each project has versioned IndexConfigs (build-time config) and Deployments (search config + lifecycle).
 
-### `POST /v1/plans`
+### `POST /v1/projects`
 
-Create a new plan with version 1.
+Create a new project with its first IndexConfig (version 1).
 
 **Request body:**
 
@@ -172,23 +172,14 @@ Create a new plan with version 1.
     "index_collection": "my_docs_v1",
     "distance_metric": "cosine",
     "quantization": null,
-    "top_k": 20,
-    "rerank_top_k": 5,
-    "reranker": null,
-    "hybrid_alpha": null,
-    "metadata_filters": null,
-    "tenant_isolation_field": null,
-    "cache_enabled": true,
-    "cache_ttl_seconds": 3600,
-    "max_tokens_per_query": null,
     "change_comment": "initial version"
   }
 }
 ```
 
-**Plan name rules:** Lowercase letters, digits, and hyphens. Cannot start or end with a hyphen. Max 255 chars. Must be globally unique.
+**Project name rules:** Lowercase letters, digits, and hyphens. Cannot start or end with a hyphen. Max 255 chars. Must be globally unique.
 
-**Config field reference:**
+**IndexConfig field reference (build-time only — search config goes on Deployment):**
 
 | Field | Type | Default | Constraints | Description |
 |---|---|---|---|---|
@@ -201,16 +192,7 @@ Create a new plan with version 1.
 | `index_backend` | string | `"qdrant"` | One of: `qdrant`, `pgvector` | Vector index backend. |
 | `index_collection` | string | — | Required | Collection name in Qdrant (or table name in pgvector). |
 | `distance_metric` | string | `"cosine"` | One of: `cosine`, `dot`, `euclidean` | Must match the collection's configured metric. |
-| `quantization` | string\|null | null | One of: `scalar`, `product`, null | Vector quantization. Applied at index creation time, not at query time. |
-| `top_k` | int | 10 | `>= 1` | Number of candidates returned from the ANN index. |
-| `rerank_top_k` | int\|null | null | `>= 1` and `<= top_k` | Number of results returned after reranking. Requires `reranker`. |
-| `reranker` | string\|null | null | — | Reranker identifier in `"provider:model"` format. Supported providers: `cross_encoder` (runs in-process via sentence-transformers), `cohere` (Cohere Rerank API — requires `COHERE_API_KEY`). Examples: `"cross_encoder:cross-encoder/ms-marco-MiniLM-L-6-v2"`, `"cohere:rerank-english-v3.0"`. Bare provider name (e.g. `"cross_encoder"`) uses the default model. |
-| `hybrid_alpha` | float\|null | null | `0.0–1.0` | Dense/sparse blend weight. `1.0` = pure dense. `0.0` = pure sparse. |
-| `metadata_filters` | object\|null | null | — | Default metadata filter applied to every query against this plan. |
-| `tenant_isolation_field` | string\|null | null | — | Payload field used for tenant-scoped filtering. |
-| `cache_enabled` | bool | true | — | Enable semantic query cache for this plan. |
-| `cache_ttl_seconds` | int | 3600 | `>= 0` | Cache TTL. `0` = disabled. |
-| `max_tokens_per_query` | int\|null | null | `> 0` | Token limit per query (context packing, Phase 8). |
+| `quantization` | string\|null | null | One of: `scalar`, `product`, null | Vector quantization. Applied at index creation time. |
 | `change_comment` | string | `""` | Max 2048 chars | Human-readable note about this version's changes. |
 
 **Provider-modality compatibility matrix:**
@@ -219,9 +201,9 @@ Create a new plan with version 1.
 |---|---|---|
 | `sentence_transformers` | `text` | Runs in-process via threadpool. |
 | `openai` | `text` | Calls OpenAI Embeddings API. Requires `OPENAI_API_KEY`. |
-| `clip` | `text`, `image` | Both modalities in one model. Phase 8. |
-| `whisper` | `audio` | Transcription → text → embed pipeline. Phase 8. |
-| `video_frame` | `video` | Frame sampling + ViT mean-pool. Phase 8. |
+| `clip` | `text`, `image` | Both modalities in one model. |
+| `whisper` | `audio` | Transcription → text → embed pipeline. |
+| `video_frame` | `video` | Frame sampling + ViT mean-pool. |
 
 **Response 201:**
 
@@ -234,7 +216,7 @@ Create a new plan with version 1.
   "created_at": "2026-02-25T12:00:00Z",
   "updated_at": "2026-02-25T12:00:00Z",
   "created_by": "alice",
-  "current_version": {
+  "current_index_config": {
     "id": "018e7a2b-4000-7000-b234-567890abcdef",
     "version": 1,
     "is_current": true,
@@ -248,15 +230,6 @@ Create a new plan with version 1.
     "index_collection": "my_docs_v1",
     "distance_metric": "cosine",
     "quantization": null,
-    "top_k": 20,
-    "rerank_top_k": 5,
-    "reranker": null,
-    "hybrid_alpha": null,
-    "metadata_filters": null,
-    "tenant_isolation_field": null,
-    "cache_enabled": true,
-    "cache_ttl_seconds": 3600,
-    "max_tokens_per_query": null,
     "change_comment": "initial version",
     "config_hash": "a3b4c5d6e7f8...",
     "created_at": "2026-02-25T12:00:00Z",
@@ -269,14 +242,14 @@ Create a new plan with version 1.
 
 | Status | error_code | Cause |
 |---|---|---|
-| 409 | `CONFLICT` | A plan named `{name}` already exists. |
+| 409 | `CONFLICT` | A project named `{name}` already exists. |
 | 422 | `VALIDATION_ERROR` | Config validation failed. `detail.errors` contains all failures. |
 
 ---
 
-### `GET /v1/plans`
+### `GET /v1/projects`
 
-List plans, newest first. Cursor-paginated.
+List projects, newest first. Cursor-paginated.
 
 **Query parameters:**
 
@@ -284,13 +257,13 @@ List plans, newest first. Cursor-paginated.
 |---|---|---|---|
 | `cursor` | string | — | Opaque pagination cursor from previous response. |
 | `limit` | int | 20 | Results per page. Range: 1–100. |
-| `include_archived` | bool | false | Include archived (soft-deleted) plans. |
+| `include_archived` | bool | false | Include archived (soft-deleted) projects. |
 
 **Response 200:**
 
 ```json
 {
-  "items": [ /* PlanResponse objects */ ],
+  "items": [ /* ProjectResponse objects */ ],
   "total": 47,
   "cursor": "MTU=",
   "has_more": true
@@ -301,63 +274,63 @@ Pass `cursor` from the response as the `cursor` query param in the next request.
 
 ---
 
-### `GET /v1/plans/{name}`
+### `GET /v1/projects/{name}`
 
-Get a plan and its current version.
+Get a project and its current IndexConfig.
 
-**Response 200:** `PlanResponse` (same shape as POST response).
+**Response 200:** `ProjectResponse` (same shape as POST response).
 
-**Error:** 404 `PLAN_NOT_FOUND`.
+**Error:** 404 `PROJECT_NOT_FOUND`.
 
 ---
 
-### `POST /v1/plans/{name}/versions`
+### `POST /v1/projects/{name}/index-configs`
 
-Create a new version of an existing plan. The new version immediately becomes current.
+Create a new IndexConfig version. The new version immediately becomes current.
 
 **Request body:**
 
 ```json
 {
   "created_by": "alice",
-  "config": { /* PlanVersionConfig — same fields as above */ }
+  "config": { /* IndexConfigInput — same fields as above */ }
 }
 ```
 
-**Response 201:** `PlanVersionResponse`
+**Response 201:** `IndexConfigResponse`
 
 **Error responses:**
 
 | Status | error_code | Cause |
 |---|---|---|
-| 404 | `PLAN_NOT_FOUND` | No plan with this name. |
-| 409 | `CONFLICT` | Plan is archived. |
-| 409 | `DUPLICATE_CONFIG_HASH` | An existing version has identical retrieval config. `detail.existing_version` gives the version number. |
+| 404 | `PROJECT_NOT_FOUND` | No project with this name. |
+| 409 | `CONFLICT` | Project is archived. |
+| 409 | `DUPLICATE_CONFIG_HASH` | An existing version has identical index config. `detail.existing_version` gives the version number. |
 | 422 | `VALIDATION_ERROR` | Config validation failed. |
 
 ---
 
-### `GET /v1/plans/{name}/versions`
+### `GET /v1/projects/{name}/index-configs`
 
-List all versions of a plan, oldest first.
+List all IndexConfig versions for a project, oldest first.
 
-**Response 200:** `list[PlanVersionResponse]`
-
----
-
-### `GET /v1/plans/{name}/versions/{version_num}`
-
-Get a specific version.
-
-**Response 200:** `PlanVersionResponse`
-
-**Error:** 404 `PLAN_VERSION_NOT_FOUND`.
+**Response 200:** `list[IndexConfigResponse]`
 
 ---
 
-### `POST /v1/plans/{name}/clone`
+### `GET /v1/projects/{name}/index-configs/{version_num}`
 
-Clone a plan's current version as version 1 of a new plan. The two plans share no state after creation — changes to one do not affect the other.
+Get a specific IndexConfig version.
+
+**Response 200:** `IndexConfigResponse`
+
+**Error:** 404 `INDEX_CONFIG_NOT_FOUND`.
+
+---
+
+### `POST /v1/projects/{name}/clone`
+
+Clone a project's current IndexConfig as version 1 of a new project. The two projects share no state after creation.
 
 **Request body:**
 
@@ -369,20 +342,20 @@ Clone a plan's current version as version 1 of a new plan. The two plans share n
 }
 ```
 
-**Response 201:** `PlanResponse` for the new plan.
+**Response 201:** `ProjectResponse` for the new project.
 
 **Error responses:**
 
 | Status | error_code | Cause |
 |---|---|---|
-| 404 | `PLAN_NOT_FOUND` | Source plan not found or has no current version. |
+| 404 | `PROJECT_NOT_FOUND` | Source project not found or has no current IndexConfig. |
 | 409 | `CONFLICT` | `new_name` already exists. |
 
 ---
 
-### `DELETE /v1/plans/{name}`
+### `DELETE /v1/projects/{name}`
 
-Soft-delete (archive) a plan. Archived plans cannot receive new versions or new deployments. Existing data is preserved.
+Soft-delete (archive) a project. Archived projects cannot receive new index configs or deployments. Existing data is preserved.
 
 **Response:** 204 No Content.
 
@@ -390,18 +363,23 @@ Soft-delete (archive) a plan. Archived plans cannot receive new versions or new 
 
 ## Deployments
 
-Deployments bind a plan version to live traffic. A deployment goes through a state machine from `PENDING` → `ACTIVE` (or rolls back).
+Deployments bind an IndexConfig version to live traffic and carry the runtime search config. A deployment goes through a state machine from `PENDING` → `ACTIVE` (or rolls back).
 
-### `POST /v1/plans/{plan_name}/deployments`
+### `POST /v1/projects/{project_name}/deployments`
 
-Deploy a version of a plan.
+Deploy an IndexConfig version with search config.
 
-**Instant deployment** — version goes live immediately at 100% traffic:
+**Instant deployment** — goes live immediately at 100% traffic:
 
 ```json
 {
-  "plan_version": 2,
-  "change_note": "upgrading to bge-m3 from bge-base",
+  "index_config_version": 2,
+  "top_k": 10,
+  "reranker": "cross_encoder:cross-encoder/ms-marco-MiniLM-L-6-v2",
+  "rerank_top_k": 5,
+  "cache_enabled": true,
+  "cache_ttl_seconds": 3600,
+  "change_note": "upgrading to bge-m3, adding cross-encoder",
   "created_by": "alice"
 }
 ```
@@ -410,7 +388,8 @@ Deploy a version of a plan.
 
 ```json
 {
-  "plan_version": 2,
+  "index_config_version": 2,
+  "top_k": 10,
   "rollout_step_percent": 10.0,
   "rollout_step_interval_seconds": 300,
   "rollback_recall_threshold": 0.80,
@@ -420,15 +399,24 @@ Deploy a version of a plan.
 }
 ```
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `plan_version` | int | Yes | Version number to deploy. Must exist. |
-| `rollout_step_percent` | float | Both or neither | Traffic increase per step (1–100). |
-| `rollout_step_interval_seconds` | int | Both or neither | Seconds between steps. Min 10. |
-| `rollback_recall_threshold` | float | No | Auto-rollback if Recall@10 drops below this value (0.0–1.0). |
-| `rollback_error_rate_threshold` | float | No | Auto-rollback if error rate exceeds this value (0.0–1.0). |
-| `change_note` | string | No | Human-readable description. Max 2048 chars. |
-| `created_by` | string | Yes | Identity of deployer. |
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `index_config_version` | int | Yes | — | IndexConfig version number to deploy. Must exist. |
+| `top_k` | int | No | 10 | Number of ANN candidates returned from the index. |
+| `reranker` | string\|null | No | null | Reranker in `"provider:model"` format. Supported: `cross_encoder`, `cohere`. |
+| `rerank_top_k` | int\|null | No | null | Post-rerank result count. Must be ≤ `top_k`. |
+| `hybrid_alpha` | float\|null | No | null | Dense/sparse blend weight (0.0–1.0). |
+| `metadata_filters` | object\|null | No | null | Default metadata filter for all queries. |
+| `tenant_isolation_field` | string\|null | No | null | Payload field for tenant-scoped filtering. |
+| `cache_enabled` | bool | No | true | Enable semantic query cache. |
+| `cache_ttl_seconds` | int | No | 3600 | Cache TTL. `0` = disabled. |
+| `max_tokens_per_query` | int\|null | No | null | Token cap for context packing. |
+| `rollout_step_percent` | float | Both or neither | — | Traffic increase per step (1–100). |
+| `rollout_step_interval_seconds` | int | Both or neither | — | Seconds between steps. Min 10. |
+| `rollback_recall_threshold` | float | No | null | Auto-rollback if Recall@5 drops below this (0.0–1.0). |
+| `rollback_error_rate_threshold` | float | No | null | Auto-rollback if error rate exceeds this (0.0–1.0). |
+| `change_note` | string | No | `""` | Human-readable description. Max 2048 chars. |
+| `created_by` | string | Yes | — | Identity of deployer. |
 
 **Response 201:** `DeploymentResponse`
 
@@ -436,9 +424,16 @@ Deploy a version of a plan.
 {
   "id": "018e7a2c-0000-7000-c345-678901abcdef",
   "plan_name": "my-docs",
-  "plan_version": 2,
+  "index_config_version": 2,
   "status": "ACTIVE",
   "traffic_weight": 1.0,
+  "top_k": 10,
+  "reranker": null,
+  "rerank_top_k": null,
+  "hybrid_alpha": null,
+  "metadata_filters": null,
+  "cache_enabled": true,
+  "cache_ttl_seconds": 3600,
   "rollout_step_percent": null,
   "rollout_step_interval_seconds": null,
   "rollback_recall_threshold": null,
@@ -468,22 +463,22 @@ Deploy a version of a plan.
 
 | Status | error_code | Cause |
 |---|---|---|
-| 404 | `PLAN_NOT_FOUND` | Plan not found or archived. |
-| 404 | `PLAN_VERSION_NOT_FOUND` | Specified version doesn't exist. |
-| 409 | `CONFLICT` | Plan already has a live deployment (ACTIVE or ROLLING_OUT). |
+| 404 | `PROJECT_NOT_FOUND` | Project not found or archived. |
+| 404 | `INDEX_CONFIG_NOT_FOUND` | Specified IndexConfig version doesn't exist. |
+| 409 | `CONFLICT` | Project already has a live deployment (ACTIVE or ROLLING_OUT). |
 | 422 | `VALIDATION_ERROR` | Only one of rollout_step_percent / rollout_step_interval_seconds provided. |
 
 ---
 
-### `GET /v1/plans/{plan_name}/deployments`
+### `GET /v1/projects/{project_name}/deployments`
 
-List all deployments for a plan, newest first (up to 20).
+List all deployments for a project, newest first (up to 20).
 
 **Response 200:** `list[DeploymentResponse]`
 
 ---
 
-### `GET /v1/plans/{plan_name}/deployments/{deployment_id}`
+### `GET /v1/projects/{project_name}/deployments/{deployment_id}`
 
 Get a specific deployment.
 
@@ -493,9 +488,9 @@ Get a specific deployment.
 
 ---
 
-### `POST /v1/plans/{plan_name}/deployments/{deployment_id}/rollback`
+### `POST /v1/projects/{project_name}/deployments/{deployment_id}/rollback`
 
-Immediately roll back a live deployment. Sets traffic_weight to 0 and status to `ROLLED_BACK`. Clears the Redis active-deployment key so subsequent queries fall back to Postgres for plan config resolution.
+Immediately roll back a live deployment. Sets traffic_weight to 0 and status to `ROLLED_BACK`. Clears the Redis serving config key so subsequent queries fall back to Postgres for config resolution.
 
 **Request body:**
 
@@ -512,7 +507,7 @@ Immediately roll back a live deployment. Sets traffic_weight to 0 and status to 
 
 | Status | error_code | Cause |
 |---|---|---|
-| 404 | `DEPLOYMENT_NOT_FOUND` | Deployment not found or belongs to a different plan. |
+| 404 | `DEPLOYMENT_NOT_FOUND` | Deployment not found or belongs to a different project. |
 | 409 | `DEPLOYMENT_STATE_ERROR` | Deployment is not live (can only roll back ACTIVE or ROLLING_OUT). |
 
 ---
@@ -549,7 +544,7 @@ Register a new subscription.
 |---|---|
 | `deployment.status_changed` | Any deployment status transition (ACTIVE, ROLLED_BACK, etc.). |
 | `eval.regression_detected` | An eval job completes and finds recall degraded vs. the previous run. |
-| `plan.version_created` | A new plan version is created. |
+| `project.index_config_created` | A new IndexConfig version is created under a project. |
 | `cost.threshold_exceeded` | Cost intelligence detects spending above a configured threshold. |
 
 **Response 201:**
@@ -662,9 +657,9 @@ def verify(secret: str, body: bytes, header: str) -> bool:
 
 ## Ingestion
 
-The ingestion API accepts documents, chunks them by word boundary, embeds each chunk, and upserts the vectors into the plan's Qdrant collection. All work is performed asynchronously by a background job runner.
+The ingestion API accepts documents, chunks them by word boundary, embeds each chunk, and upserts the vectors into the project's Qdrant collection. All work is performed asynchronously by a background job runner.
 
-### `POST /v1/plans/{plan_name}/ingest`
+### `POST /v1/projects/{project_name}/ingest`
 
 Submit a batch ingestion job. Returns immediately with status `QUEUED`.
 
@@ -672,7 +667,7 @@ Submit a batch ingestion job. Returns immediately with status `QUEUED`.
 
 ```json
 {
-  "plan_version": 1,
+  "index_config_version": 1,
   "documents": [
     {
       "id": "doc-001",
@@ -695,7 +690,7 @@ Submit a batch ingestion job. Returns immediately with status `QUEUED`.
 
 ```json
 {
-  "plan_version": 1,
+  "index_config_version": 1,
   "source_uri": "s3://my-bucket/datasets/docs-v1.jsonl",
   "chunk_size": 256,
   "overlap": 32,
@@ -707,7 +702,7 @@ Each line in the JSONL file must be: `{"id": "...", "content": "...", "metadata"
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `plan_version` | int | Yes | Plan version whose Qdrant collection to populate. Must exist. |
+| `index_config_version` | int | Yes | IndexConfig version whose Qdrant collection to populate. Must exist. |
 | `documents` | list | One of | Inline document list. Mutually exclusive with `source_uri`. |
 | `source_uri` | string | One of | S3 URI of a JSONL file. Mutually exclusive with `documents`. |
 | `chunk_size` | int | No | Max words per chunk. Range: 16–4096. Default: 512. |
@@ -720,7 +715,8 @@ Each line in the JSONL file must be: `{"id": "...", "content": "...", "metadata"
 {
   "id": "018e7a2c-2222-7000-e567-890123abcdef",
   "plan_name": "my-docs",
-  "plan_version": 1,
+  "index_config_id": "018e7a2b-4000-7000-b234-567890abcdef",
+  "index_config_version": 1,
   "source_uri": null,
   "chunk_size": 512,
   "overlap": 64,
@@ -739,6 +735,9 @@ Each line in the JSONL file must be: `{"id": "...", "content": "...", "metadata"
 
 | Field | Type | Description |
 |---|---|---|
+| `plan_name` | string | Name of the project this job belongs to. |
+| `index_config_id` | UUID | ID of the IndexConfig used for embedding and collection selection. |
+| `index_config_version` | int | Human-readable version number of the IndexConfig. |
 | `status` | string | `QUEUED`, `RUNNING`, `COMPLETED`, or `FAILED`. |
 | `total_docs` | int\|null | Total documents processed. Populated when COMPLETED. |
 | `total_chunks` | int\|null | Total chunks generated across all documents. |
@@ -752,15 +751,15 @@ Each line in the JSONL file must be: `{"id": "...", "content": "...", "metadata"
 
 | Status | Cause |
 |---|---|
-| 404 | Plan not found or archived. |
-| 404 | Specified `plan_version` not found. |
+| 404 | Project not found or archived. |
+| 404 | Specified `index_config_version` not found. |
 | 422 | Both or neither of `documents` / `source_uri` provided, or `overlap >= chunk_size`. |
 
 ---
 
-### `GET /v1/plans/{plan_name}/ingest`
+### `GET /v1/projects/{project_name}/ingest`
 
-List ingestion jobs for a plan, newest first.
+List ingestion jobs for a project, newest first.
 
 **Query parameters:** `offset` (default 0), `limit` (default 50, max 200).
 
@@ -775,13 +774,13 @@ List ingestion jobs for a plan, newest first.
 
 ---
 
-### `GET /v1/plans/{plan_name}/ingest/{job_id}`
+### `GET /v1/projects/{project_name}/ingest/{job_id}`
 
 Get a single ingestion job.
 
 **Response 200:** `IngestionJobResponse`
 
-**Error:** 404 if not found or if the job belongs to a different plan.
+**Error:** 404 if not found or if the job belongs to a different project.
 
 ---
 
@@ -792,7 +791,7 @@ Documents are split on word boundaries (whitespace-delimited tokens):
 - A document with ≤ `chunk_size` words produces a single chunk.
 - Longer documents produce overlapping windows: chunk N starts `chunk_size - overlap` words after chunk N-1.
 - Each chunk inherits the document's `metadata` plus a `chunk_index` field.
-- Chunks are embedded in batches using the plan version's embedding config.
+- Chunks are embedded in batches using the IndexConfig's embedding settings.
 - The Qdrant collection is auto-created on the first ingestion if it doesn't exist.
 
 ---
@@ -802,13 +801,13 @@ Documents are split on word boundaries (whitespace-delimited tokens):
 List endpoints use opaque cursor pagination:
 
 ```
-GET /v1/plans?limit=10
+GET /v1/projects?limit=10
 → { "items": [...], "total": 47, "cursor": "MTB=", "has_more": true }
 
-GET /v1/plans?cursor=MTB=&limit=10
+GET /v1/projects?cursor=MTB=&limit=10
 → { "items": [...], "total": 47, "cursor": "MjA=", "has_more": true }
 
-GET /v1/plans?cursor=MjA=&limit=10
+GET /v1/projects?cursor=MjA=&limit=10
 → { "items": [...], "total": 47, "cursor": null, "has_more": false }
 ```
 
@@ -818,11 +817,11 @@ The cursor is an opaque base64 string. Do not parse it — only pass it back as-
 
 ## Common Patterns
 
-### Create a plan and deploy it
+### Create a project and deploy it
 
 ```bash
-# 1. Create the plan
-curl -X POST http://localhost:8000/v1/plans \
+# 1. Create the project with its first IndexConfig (index-only fields)
+curl -X POST http://localhost:8000/v1/projects \
   -H 'Content-Type: application/json' \
   -d '{
     "name": "product-search",
@@ -835,17 +834,20 @@ curl -X POST http://localhost:8000/v1/plans \
       "modalities": ["text"],
       "index_backend": "qdrant",
       "index_collection": "products_v1",
-      "distance_metric": "cosine",
-      "top_k": 20,
-      "cache_enabled": true,
-      "cache_ttl_seconds": 1800
+      "distance_metric": "cosine"
     }
   }'
 
-# 2. Deploy it
-curl -X POST http://localhost:8000/v1/plans/product-search/deployments \
+# 2. Deploy IndexConfig v1 with search config
+curl -X POST http://localhost:8000/v1/projects/product-search/deployments \
   -H 'Content-Type: application/json' \
-  -d '{"plan_version": 1, "created_by": "eng-team"}'
+  -d '{
+    "index_config_version": 1,
+    "top_k": 20,
+    "cache_enabled": true,
+    "cache_ttl_seconds": 1800,
+    "created_by": "eng-team"
+  }'
 
 # 3. Query it
 curl -X POST http://localhost:8000/v1/query/product-search \
@@ -856,10 +858,11 @@ curl -X POST http://localhost:8000/v1/query/product-search \
 ### Gradual rollout with guard rails
 
 ```bash
-curl -X POST http://localhost:8000/v1/plans/product-search/deployments \
+curl -X POST http://localhost:8000/v1/projects/product-search/deployments \
   -H 'Content-Type: application/json' \
   -d '{
-    "plan_version": 2,
+    "index_config_version": 2,
+    "top_k": 20,
     "rollout_step_percent": 10.0,
     "rollout_step_interval_seconds": 300,
     "rollback_recall_threshold": 0.78,
@@ -873,16 +876,16 @@ curl -X POST http://localhost:8000/v1/plans/product-search/deployments \
 
 ```bash
 curl -X POST \
-  http://localhost:8000/v1/plans/product-search/deployments/{deployment_id}/rollback \
+  http://localhost:8000/v1/projects/product-search/deployments/{deployment_id}/rollback \
   -H 'Content-Type: application/json' \
   -d '{"reason": "latency spike detected", "created_by": "oncall"}'
 ```
 
-### Iterate on config without changing identity
+### Iterate on index config without renaming the project
 
 ```bash
-# Create a new version (name stays the same, version number increments)
-curl -X POST http://localhost:8000/v1/plans/product-search/versions \
+# Create a new IndexConfig version (project name stays the same, version increments)
+curl -X POST http://localhost:8000/v1/projects/product-search/index-configs \
   -H 'Content-Type: application/json' \
   -d '{
     "created_by": "alice",
@@ -894,10 +897,18 @@ curl -X POST http://localhost:8000/v1/plans/product-search/versions \
       "index_backend": "qdrant",
       "index_collection": "products_v2",
       "distance_metric": "cosine",
-      "top_k": 30,
-      "cache_enabled": true,
-      "cache_ttl_seconds": 1800,
-      "change_comment": "increased top_k from 20 to 30 for reranker headroom"
+      "change_comment": "new collection for fresh re-index"
     }
+  }'
+
+# Then deploy v2 with updated search config (more top_k for reranker headroom)
+curl -X POST http://localhost:8000/v1/projects/product-search/deployments \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "index_config_version": 2,
+    "top_k": 30,
+    "reranker": "cross_encoder:cross-encoder/ms-marco-MiniLM-L-6-v2",
+    "rerank_top_k": 5,
+    "created_by": "alice"
   }'
 ```

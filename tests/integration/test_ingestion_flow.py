@@ -31,7 +31,7 @@ def _make_job(
     *,
     job_id: str = "job-001",
     plan_name: str = "my-docs",
-    plan_version: int = 1,
+    index_config_version: int = 1,
     chunk_size: int = 512,
     overlap: int = 64,
     documents: list | None = None,
@@ -44,7 +44,7 @@ def _make_job(
     return SimpleNamespace(
         id=job_id,
         plan_name=plan_name,
-        plan_version=plan_version,
+        index_config_version=index_config_version,
         chunk_size=chunk_size,
         overlap=overlap,
         document_payload=documents if source_uri is None else None,
@@ -130,7 +130,7 @@ class TestProcessIngestionJob:
                 new=AsyncMock(return_value=job),
             ),
             patch(
-                "retrieval_os.ingestion.service._load_plan_version",
+                "retrieval_os.ingestion.service._load_index_config",
                 new=AsyncMock(return_value=pv),
             ),
             patch(
@@ -186,7 +186,7 @@ class TestProcessIngestionJob:
                 new=AsyncMock(return_value=job),
             ),
             patch(
-                "retrieval_os.ingestion.service._load_plan_version",
+                "retrieval_os.ingestion.service._load_index_config",
                 new=AsyncMock(return_value=pv),
             ),
             patch(
@@ -236,7 +236,7 @@ class TestProcessIngestionJob:
                 new=AsyncMock(return_value=job),
             ),
             patch(
-                "retrieval_os.ingestion.service._load_plan_version",
+                "retrieval_os.ingestion.service._load_index_config",
                 new=AsyncMock(return_value=pv),
             ),
             patch(
@@ -279,7 +279,7 @@ class TestProcessIngestionJob:
                 new=AsyncMock(return_value=job),
             ),
             patch(
-                "retrieval_os.ingestion.service._load_plan_version",
+                "retrieval_os.ingestion.service._load_index_config",
                 new=AsyncMock(return_value=pv),
             ),
             patch(
@@ -308,9 +308,9 @@ class TestProcessIngestionJob:
         assert upsert_kwargs.get("collection") == "custom_collection"
 
     @pytest.mark.asyncio
-    async def test_plan_version_not_found_fails_job(self) -> None:
-        """If the plan version doesn't exist, the job is marked FAILED."""
-        from retrieval_os.core.exceptions import PlanVersionNotFoundError
+    async def test_index_config_not_found_fails_job(self) -> None:
+        """If the index config doesn't exist, the job is marked FAILED."""
+        from retrieval_os.core.exceptions import IndexConfigNotFoundError
 
         job = _make_job()
         fail_mock = AsyncMock()
@@ -321,8 +321,8 @@ class TestProcessIngestionJob:
                 new=AsyncMock(return_value=job),
             ),
             patch(
-                "retrieval_os.ingestion.service._load_plan_version",
-                new=AsyncMock(side_effect=PlanVersionNotFoundError("version not found")),
+                "retrieval_os.ingestion.service._load_index_config",
+                new=AsyncMock(side_effect=IndexConfigNotFoundError("version not found")),
             ),
             patch(
                 "retrieval_os.ingestion.service.ingestion_repo.fail_job",

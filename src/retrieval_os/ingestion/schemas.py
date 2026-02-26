@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from typing import Self
 
@@ -19,7 +20,7 @@ class IngestDocumentRequest(BaseModel):
 
 
 class IngestRequest(BaseModel):
-    """Request body for ``POST /v1/plans/{plan}/ingest``."""
+    """Request body for ``POST /v1/projects/{project}/ingest``."""
 
     # Source: either inline documents OR an S3 URI (exactly one required)
     documents: list[IngestDocumentRequest] | None = Field(
@@ -35,7 +36,9 @@ class IngestRequest(BaseModel):
         ),
     )
 
-    plan_version: int = Field(..., ge=1, description="Plan version whose index to populate.")
+    index_config_version: int = Field(
+        ..., ge=1, description="Index config version whose collection to populate."
+    )
     chunk_size: int = Field(default=512, ge=16, le=4096)
     overlap: int = Field(default=64, ge=0)
     created_by: str | None = Field(default=None)
@@ -60,7 +63,8 @@ class IngestionJobResponse(BaseModel):
 
     id: str
     plan_name: str
-    plan_version: int
+    index_config_id: uuid.UUID
+    index_config_version: int
     source_uri: str | None
     chunk_size: int
     overlap: int

@@ -8,6 +8,7 @@ Integration tests differ from unit tests in two ways:
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -19,7 +20,7 @@ from retrieval_os.api.main import app
 from retrieval_os.core.database import get_db
 from retrieval_os.deployments.models import DeploymentStatus
 from retrieval_os.deployments.schemas import DeploymentResponse
-from retrieval_os.plans.schemas import PlanResponse, PlanVersionResponse
+from retrieval_os.plans.schemas import IndexConfigResponse, ProjectResponse
 
 # ── Mock session ──────────────────────────────────────────────────────────────
 
@@ -60,14 +61,17 @@ def _ts() -> datetime:
     return datetime.now(UTC)
 
 
-def make_version_response(
+_FAKE_PROJECT_ID = "018e7a2b-3f4c-7000-a123-000000000001"
+_FAKE_CONFIG_ID = "018e7a2b-4000-7000-b234-000000000001"
+
+
+def make_index_config_response(
     *,
     version: int = 1,
-    plan_name: str = "my-docs",
-) -> PlanVersionResponse:
-    return PlanVersionResponse(
-        id="018e7a2b-4000-7000-b234-000000000001",
-        plan_id="018e7a2b-3f4c-7000-a123-000000000001",
+    project_name: str = "my-docs",
+) -> IndexConfigResponse:
+    return IndexConfigResponse(
+        id=_FAKE_CONFIG_ID,
         version=version,
         is_current=True,
         embedding_provider="sentence_transformers",
@@ -77,18 +81,9 @@ def make_version_response(
         embedding_batch_size=32,
         embedding_normalize=True,
         index_backend="qdrant",
-        index_collection=f"{plan_name}_v{version}",
+        index_collection=f"{project_name}_v{version}",
         distance_metric="cosine",
         quantization=None,
-        top_k=10,
-        rerank_top_k=None,
-        reranker=None,
-        hybrid_alpha=None,
-        metadata_filters=None,
-        tenant_isolation_field=None,
-        cache_enabled=True,
-        cache_ttl_seconds=3600,
-        max_tokens_per_query=None,
         change_comment="initial",
         config_hash="a" * 64,
         created_at=_ts(),
@@ -96,37 +91,57 @@ def make_version_response(
     )
 
 
-def make_plan_response(
+def make_project_response(
     *,
     name: str = "my-docs",
     is_archived: bool = False,
-) -> PlanResponse:
-    return PlanResponse(
-        id="018e7a2b-3f4c-7000-a123-000000000001",
+) -> ProjectResponse:
+    return ProjectResponse(
+        id=_FAKE_PROJECT_ID,
         name=name,
-        description="Test plan",
+        description="Test project",
         is_archived=is_archived,
         created_at=_ts(),
         updated_at=_ts(),
         created_by="alice",
-        current_version=make_version_response(plan_name=name),
+        current_index_config=make_index_config_response(project_name=name),
     )
 
 
 def make_deployment_response(
     *,
     plan_name: str = "my-docs",
-    plan_version: int = 1,
+    index_config_version: int = 1,
     status: str = DeploymentStatus.ACTIVE.value,
     dep_id: str = "dep-001",
     rollback_recall_threshold: float | None = None,
     rollback_error_rate_threshold: float | None = None,
     rollback_reason: str | None = None,
+    # search config overrides
+    top_k: int = 10,
+    reranker: str | None = None,
+    rerank_top_k: int | None = None,
+    hybrid_alpha: float | None = None,
+    metadata_filters: dict | None = None,
+    tenant_isolation_field: str | None = None,
+    cache_enabled: bool = True,
+    cache_ttl_seconds: int = 3600,
+    max_tokens_per_query: int | None = None,
 ) -> DeploymentResponse:
     return DeploymentResponse(
         id=dep_id,
         plan_name=plan_name,
-        plan_version=plan_version,
+        index_config_id=uuid.UUID(_FAKE_CONFIG_ID),
+        index_config_version=index_config_version,
+        top_k=top_k,
+        rerank_top_k=rerank_top_k,
+        reranker=reranker,
+        hybrid_alpha=hybrid_alpha,
+        metadata_filters=metadata_filters,
+        tenant_isolation_field=tenant_isolation_field,
+        cache_enabled=cache_enabled,
+        cache_ttl_seconds=cache_ttl_seconds,
+        max_tokens_per_query=max_tokens_per_query,
         status=status,
         traffic_weight=1.0 if status == DeploymentStatus.ACTIVE.value else 0.0,
         rollout_step_percent=None,
@@ -153,7 +168,7 @@ def make_eval_ns(
     return SimpleNamespace(
         id="eval-001",
         plan_name="my-docs",
-        plan_version=1,
+        index_config_version=1,
         recall_at_5=recall_at_5,
         total_queries=total_queries,
         failed_queries=failed_queries,

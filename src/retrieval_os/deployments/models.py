@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
-from sqlalchemy import DateTime, Float, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -23,10 +26,10 @@ class DeploymentStatus(StrEnum):
 
 
 class Deployment(Base):
-    """A deployment binds a plan version to live traffic.
+    """A deployment binds an index config to live traffic with its own search config.
 
     Invariants enforced at the service layer:
-    - At most one deployment per plan in status ACTIVE or ROLLING_OUT.
+    - At most one deployment per project in status ACTIVE or ROLLING_OUT.
     - traffic_weight is in [0.0, 1.0].
     - rollout_step_percent is in (0, 100].
     """
@@ -37,7 +40,23 @@ class Deployment(Base):
         PG_UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid7())
     )
     plan_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    plan_version: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Index config reference
+    index_config_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("index_configs.id"), nullable=False
+    )
+    index_config_version: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # ── Search config (runtime, does not affect index) ─────────────────────────
+    top_k: Mapped[int] = mapped_column(Integer, nullable=False, server_default="10")
+    rerank_top_k: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reranker: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    hybrid_alpha: Mapped[float | None] = mapped_column(Float, nullable=True)
+    metadata_filters: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    tenant_isolation_field: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    cache_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    cache_ttl_seconds: Mapped[int] = mapped_column(Integer, nullable=False, server_default="3600")
+    max_tokens_per_query: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     status: Mapped[str] = mapped_column(
         String(50), nullable=False, default=DeploymentStatus.PENDING.value
@@ -45,12 +64,10 @@ class Deployment(Base):
 
     # Traffic control
     traffic_weight: Mapped[float] = mapped_column(Float, nullable=False, server_default="0.0")
-    # Gradual rollout: percent to increment each step (None = instant full deploy)
     rollout_step_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
-    # How often to advance (seconds between steps)
     rollout_step_interval_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    # Rollback thresholds (optional — watchdog only triggers when set)
+    # Rollback thresholds
     rollback_recall_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
     rollback_error_rate_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
 

@@ -34,7 +34,7 @@ class TestIngestionJobModel:
         job = IngestionJob(
             id="j-001",
             plan_name="acme",
-            plan_version=1,
+            index_config_version=1,
             source_uri=None,
             document_payload=[{"id": "d1", "content": "hello", "metadata": {}}],
             chunk_size=512,
@@ -51,7 +51,7 @@ class TestIngestionJobModel:
         job = IngestionJob(
             id="j-002",
             plan_name="acme",
-            plan_version=2,
+            index_config_version=2,
             source_uri="s3://bucket/key.jsonl",
             document_payload=None,
             chunk_size=256,
@@ -186,7 +186,7 @@ class TestIngestRequest:
     def test_inline_documents_valid(self) -> None:
         req = IngestRequest(
             documents=[IngestDocumentRequest(id="d1", content="hello")],
-            plan_version=1,
+            index_config_version=1,
         )
         assert req.documents is not None
         assert len(req.documents) == 1
@@ -195,28 +195,28 @@ class TestIngestRequest:
     def test_source_uri_valid(self) -> None:
         req = IngestRequest(
             source_uri="s3://bucket/file.jsonl",
-            plan_version=1,
+            index_config_version=1,
         )
         assert req.source_uri == "s3://bucket/file.jsonl"
         assert req.documents is None
 
     def test_neither_raises(self) -> None:
         with pytest.raises(Exception):
-            IngestRequest(plan_version=1)
+            IngestRequest(index_config_version=1)
 
     def test_both_raises(self) -> None:
         with pytest.raises(Exception):
             IngestRequest(
                 documents=[IngestDocumentRequest(id="d1", content="hi")],
                 source_uri="s3://bucket/file.jsonl",
-                plan_version=1,
+                index_config_version=1,
             )
 
     def test_overlap_ge_chunk_size_raises(self) -> None:
         with pytest.raises(Exception):
             IngestRequest(
                 source_uri="s3://bucket/f.jsonl",
-                plan_version=1,
+                index_config_version=1,
                 chunk_size=64,
                 overlap=64,
             )
@@ -224,7 +224,7 @@ class TestIngestRequest:
     def test_defaults(self) -> None:
         req = IngestRequest(
             source_uri="s3://bucket/f.jsonl",
-            plan_version=1,
+            index_config_version=1,
         )
         assert req.chunk_size == 512
         assert req.overlap == 64
@@ -232,7 +232,7 @@ class TestIngestRequest:
     def test_created_by_optional(self) -> None:
         req = IngestRequest(
             source_uri="s3://bucket/f.jsonl",
-            plan_version=1,
+            index_config_version=1,
         )
         assert req.created_by is None
 
@@ -281,7 +281,7 @@ class TestProcessNextIngestionJob:
         fake_job = IngestionJob(
             id="j-001",
             plan_name="acme",
-            plan_version=1,
+            index_config_version=1,
             source_uri=None,
             document_payload=[{"id": "d1", "content": "word " * 10, "metadata": {}}],
             chunk_size=512,
@@ -306,7 +306,7 @@ class TestProcessNextIngestionJob:
                 new=AsyncMock(return_value=fake_job),
             ),
             patch(
-                "retrieval_os.ingestion.service._load_plan_version",
+                "retrieval_os.ingestion.service._load_index_config",
                 new=AsyncMock(return_value=fake_pv),
             ),
             patch(
@@ -342,7 +342,7 @@ class TestProcessNextIngestionJob:
         fake_job = IngestionJob(
             id="j-err",
             plan_name="acme",
-            plan_version=1,
+            index_config_version=1,
             source_uri=None,
             document_payload=[],
             chunk_size=512,
@@ -360,7 +360,7 @@ class TestProcessNextIngestionJob:
                 new=AsyncMock(return_value=fake_job),
             ),
             patch(
-                "retrieval_os.ingestion.service._load_plan_version",
+                "retrieval_os.ingestion.service._load_index_config",
                 new=AsyncMock(side_effect=RuntimeError("db down")),
             ),
             patch(

@@ -125,7 +125,7 @@ retrieval-os/
 │   │       └── pagination.py   CursorPage[T] generic
 │   │
 │   ├── plans/
-│   │   ├── models.py           RetrievalPlan, PlanVersion ORM
+│   │   ├── models.py           Project, IndexConfig ORM
 │   │   ├── validators.py       validate_plan_config(), compute_config_hash()
 │   │   ├── schemas.py          Pydantic request/response schemas
 │   │   ├── repository.py       DB access (SELECT FOR UPDATE on version create)
@@ -243,7 +243,8 @@ d.status = "ACTIVE"
 # CORRECT
 d = Deployment(
     plan_name="docs",
-    plan_version=1,
+    index_config_id=uuid.uuid4(),
+    index_config_version=1,
     status="ACTIVE",
     created_at=datetime.now(UTC),
     updated_at=datetime.now(UTC),

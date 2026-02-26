@@ -4,35 +4,35 @@ All tables use UUIDv7 primary keys unless noted. UUIDv7 is time-ordered (48-bit 
 
 ---
 
-## `retrieval_plans`
+## `projects`
 
-A named container for a retrieval configuration. The plan itself holds metadata; all config lives in `plan_versions`.
+A named container for a retrieval use case (e.g. "docs-search", "product-catalog"). Holds metadata and acts as the namespace for index configs, deployments, ingestion jobs, and eval runs.
 
 | Column | Type | Nullable | Default | Description |
 |---|---|---|---|---|
 | `id` | UUID | No | UUIDv7 | Primary key. |
 | `name` | VARCHAR(255) | No | — | Globally unique slug. Lowercase letters, digits, hyphens. Cannot start/end with hyphen. |
 | `description` | TEXT | No | `''` | Free-text description. |
-| `is_archived` | BOOLEAN | No | `false` | Soft-delete flag. Archived plans cannot receive new versions or deployments. |
+| `is_archived` | BOOLEAN | No | `false` | Soft-delete flag. Archived projects cannot receive new index configs or deployments. |
 | `created_at` | TIMESTAMPTZ | No | — | Creation timestamp. |
 | `updated_at` | TIMESTAMPTZ | No | — | Last update timestamp (updated on archive). |
 | `created_by` | VARCHAR(255) | No | — | Identity string of creator. |
 
 **Indexes:**
-- `idx_retrieval_plans_name` — UNIQUE on `name`
-- `idx_retrieval_plans_created_at` — on `created_at` (for list ordering)
+- UNIQUE on `name`
+- on `created_at` (for list ordering)
 
 ---
 
-## `plan_versions`
+## `index_configs`
 
-An immutable retrieval config snapshot. Every change to embedding or index configuration creates a new row. The current version is identified by `is_current = true`.
+An immutable snapshot of how to *build* the index: embedding model, vector dimensions, collection, and distance metric. Build-time settings only — changing any of these requires re-ingesting documents. The current config is identified by `is_current = true`.
 
 | Column | Type | Nullable | Default | Description |
 |---|---|---|---|---|
 | `id` | UUID | No | UUIDv7 | Primary key. |
-| `plan_id` | UUID | No | — | FK → `retrieval_plans.id` ON DELETE CASCADE. |
-| `version` | INTEGER | No | — | Monotonically increasing per plan. Assigned via `SELECT FOR UPDATE` on the parent plan row. |
+| `project_id` | UUID | No | — | FK → `projects.id` ON DELETE CASCADE. |
+| `version` | INTEGER | No | — | Monotonically increasing per project. Assigned via `SELECT FOR UPDATE` on the parent project row. |
 | `is_current` | BOOLEAN | No | `false` | True for the latest version only. Previous version's `is_current` is set to false on new version creation (within the same transaction). |
 | **Embedding config** | | | | |
 | `embedding_provider` | VARCHAR(100) | No | — | One of: `sentence_transformers`, `openai`, `clip`, `whisper`, `video_frame`. |
@@ -46,41 +46,28 @@ An immutable retrieval config snapshot. Every change to embedding or index confi
 | `index_collection` | VARCHAR(255) | No | — | Collection/table name in the index. |
 | `distance_metric` | VARCHAR(50) | No | — | One of: `cosine`, `dot`, `euclidean`. |
 | `quantization` | VARCHAR(50) | Yes | `NULL` | One of: `scalar`, `product`, null. |
-| **Retrieval config** | | | | |
-| `top_k` | INTEGER | No | — | Number of ANN candidates. |
-| `rerank_top_k` | INTEGER | Yes | `NULL` | Post-rerank result count. Must be ≤ `top_k` if set. |
-| `reranker` | VARCHAR(255) | Yes | `NULL` | Reranker model identifier. |
-| `hybrid_alpha` | FLOAT | Yes | `NULL` | Dense/sparse blend (0.0–1.0). |
-| **Filter config** | | | | |
-| `metadata_filters` | JSONB | Yes | `NULL` | Default filter applied to all queries for this plan. |
-| `tenant_isolation_field` | VARCHAR(255) | Yes | `NULL` | Payload field used to scope queries by tenant. |
-| **Cost/cache config** | | | | |
-| `cache_enabled` | BOOLEAN | No | `true` | Enable semantic query cache. |
-| `cache_ttl_seconds` | INTEGER | No | 3600 | Cache TTL in seconds. 0 = disabled. |
-| `max_tokens_per_query` | INTEGER | Yes | `NULL` | Token cap for context packing (Phase 8). |
 | **Governance** | | | | |
 | `change_comment` | TEXT | No | `''` | Human-readable note about this version. |
 | `created_at` | TIMESTAMPTZ | No | — | Version creation timestamp. |
 | `created_by` | VARCHAR(255) | No | — | Identity of version creator. |
-| `config_hash` | CHAR(64) | No | — | SHA-256 hex digest of canonical config. See below. |
+| `config_hash` | CHAR(64) | No | — | SHA-256 hex digest of canonical index config. See below. |
 
 **Constraints:**
-- `uq_plan_version` — UNIQUE (`plan_id`, `version`)
-- `uq_plan_config_hash` — UNIQUE (`plan_id`, `config_hash`) — prevents duplicate retrieval behaviour within a plan
+- `uq_index_config_version` — UNIQUE (`project_id`, `version`)
+- `uq_index_config_hash` — UNIQUE (`project_id`, `config_hash`) — prevents duplicate index configs within a project
 
 **Indexes:**
-- `idx_plan_versions_plan_id` — on `plan_id`
-- `idx_plan_versions_is_current` — on (`plan_id`, `is_current`)
+- on `project_id`
+- on (`project_id`, `is_current`)
 
 ### `config_hash` computation
 
-SHA-256 of a canonical JSON string built from the following fields only (excludes cost/cache/governance fields):
+SHA-256 of a canonical JSON string built from index-relevant fields only (search config fields live on `deployments` and are excluded):
 
 ```
 embedding_provider, embedding_model, embedding_dimensions,
 modalities (sorted), index_backend, index_collection,
-distance_metric, quantization, top_k, rerank_top_k,
-reranker, hybrid_alpha, metadata_filters
+distance_metric, quantization
 ```
 
 The JSON is serialised with `sort_keys=True` and no whitespace. Lists are sorted before serialisation so field order does not affect the hash.
@@ -89,19 +76,31 @@ The JSON is serialised with `sort_keys=True` and no whitespace. Lists are sorted
 
 ## `deployments`
 
-A deployment binds a plan version to live traffic and tracks its rollout lifecycle.
+A deployment binds an IndexConfig to live traffic, carries the runtime search config, and tracks the rollout lifecycle.
 
 | Column | Type | Nullable | Default | Description |
 |---|---|---|---|---|
 | `id` | VARCHAR(36) | No | UUIDv7 | Primary key (stored as string for portability). |
-| `plan_name` | VARCHAR(255) | No | — | Denormalised plan name (avoid join on hot queries). |
-| `plan_version` | INTEGER | No | — | Version number being deployed. |
+| `plan_name` | VARCHAR(255) | No | — | Denormalised project name (avoid join on hot queries). |
+| `index_config_id` | UUID | No | — | FK → `index_configs.id`. Which index this deployment serves. |
+| `index_config_version` | INTEGER | No | — | Denormalised version number for display. |
 | `status` | VARCHAR(50) | No | `'PENDING'` | State machine value. See status table below. |
 | `traffic_weight` | FLOAT | No | `0.0` | Fraction of live traffic (0.0–1.0). |
 | `rollout_step_percent` | FLOAT | Yes | `NULL` | Traffic increment per rollout step (1–100). NULL = instant deploy. |
 | `rollout_step_interval_seconds` | INTEGER | Yes | `NULL` | Seconds between rollout steps. |
-| `rollback_recall_threshold` | FLOAT | Yes | `NULL` | Auto-rollback if Recall@10 drops below this. |
+| `rollback_recall_threshold` | FLOAT | Yes | `NULL` | Auto-rollback if Recall@5 drops below this. |
 | `rollback_error_rate_threshold` | FLOAT | Yes | `NULL` | Auto-rollback if error rate exceeds this. |
+| **Search config** | | | | |
+| `top_k` | INTEGER | No | 10 | Number of ANN candidates returned from the index. |
+| `rerank_top_k` | INTEGER | Yes | `NULL` | Post-rerank result count. Must be ≤ `top_k` if set. |
+| `reranker` | VARCHAR(255) | Yes | `NULL` | Reranker identifier (`"provider:model"` format). |
+| `hybrid_alpha` | FLOAT | Yes | `NULL` | Dense/sparse blend weight (0.0–1.0). |
+| `metadata_filters` | JSONB | Yes | `NULL` | Default filter applied to all queries for this deployment. |
+| `tenant_isolation_field` | VARCHAR(255) | Yes | `NULL` | Payload field used to scope queries by tenant. |
+| `cache_enabled` | BOOLEAN | No | `true` | Enable semantic query cache. |
+| `cache_ttl_seconds` | INTEGER | No | 3600 | Cache TTL in seconds. 0 = disabled. |
+| `max_tokens_per_query` | INTEGER | Yes | `NULL` | Token cap for context packing. |
+| **Governance** | | | | |
 | `change_note` | TEXT | No | `''` | Human-readable deployment note. |
 | `created_at` | TIMESTAMPTZ | No | — | Deployment creation time. |
 | `updated_at` | TIMESTAMPTZ | No | — | Last status update time. |
@@ -304,13 +303,14 @@ Outbound HTTP event subscriptions. Each row registers a URL to receive signed ev
 
 ## `ingestion_jobs`
 
-Tracks document ingestion jobs. Each job chunks, embeds, and upserts documents into the plan's vector index.
+Tracks document ingestion jobs. Each job chunks, embeds, and upserts documents into the IndexConfig's vector collection.
 
 | Column | Type | Nullable | Default | Description |
 |---|---|---|---|---|
 | `id` | VARCHAR(36) | No | UUIDv7 | Primary key. |
-| `plan_name` | VARCHAR(255) | No | — | Target plan. |
-| `plan_version` | INTEGER | No | — | Target plan version whose index is populated. |
+| `plan_name` | VARCHAR(255) | No | — | Target project name. |
+| `index_config_id` | UUID | No | — | FK → `index_configs.id`. Which index is populated. |
+| `index_config_version` | INTEGER | No | — | Denormalised version number for display. |
 | `source_uri` | TEXT | Yes | `NULL` | S3 URI of a JSONL source file. Null if documents were provided inline. |
 | `document_payload` | JSON | Yes | `NULL` | Inline document list serialised as JSON. Null if `source_uri` is set. |
 | `chunk_size` | INTEGER | No | 512 | Max words per chunk. |
@@ -352,11 +352,11 @@ class MyModel(Base):
 Relationships use `selectin` loading to avoid N+1 on list queries:
 
 ```python
-versions: Mapped[list[PlanVersion]] = relationship(
-    "PlanVersion",
-    back_populates="plan",
+index_configs: Mapped[list[IndexConfig]] = relationship(
+    "IndexConfig",
+    back_populates="project",
     lazy="selectin",
-    order_by="PlanVersion.version",
+    order_by="IndexConfig.version",
 )
 ```
 

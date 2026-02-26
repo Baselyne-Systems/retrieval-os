@@ -1,4 +1,4 @@
-"""FastAPI router for the Plans domain."""
+"""FastAPI router for the Projects domain."""
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,96 +7,96 @@ from retrieval_os.core.database import get_db
 from retrieval_os.core.schemas.pagination import CursorPage
 from retrieval_os.plans import service
 from retrieval_os.plans.schemas import (
-    ClonePlanRequest,
-    CreatePlanRequest,
-    CreateVersionRequest,
-    PlanResponse,
-    PlanVersionResponse,
+    CloneProjectRequest,
+    CreateIndexConfigRequest,
+    CreateProjectRequest,
+    IndexConfigResponse,
+    ProjectResponse,
 )
 
-router = APIRouter(prefix="/v1/plans", tags=["plans"])
+router = APIRouter(prefix="/v1/projects", tags=["projects"])
 
 
-@router.post("", status_code=201, response_model=PlanResponse)
-async def create_plan(
-    request: CreatePlanRequest,
+@router.post("", status_code=201, response_model=ProjectResponse)
+async def create_project(
+    request: CreateProjectRequest,
     db: AsyncSession = Depends(get_db),
-) -> PlanResponse:
-    """Create a new retrieval plan with its first version."""
-    return await service.create_plan(db, request)
+) -> ProjectResponse:
+    """Create a new project with its first index config."""
+    return await service.create_project(db, request)
 
 
-@router.get("", response_model=CursorPage[PlanResponse])
-async def list_plans(
+@router.get("", response_model=CursorPage[ProjectResponse])
+async def list_projects(
     cursor: str | None = Query(None, description="Pagination cursor from previous response"),
     limit: int = Query(20, ge=1, le=100),
     include_archived: bool = Query(False),
     db: AsyncSession = Depends(get_db),
-) -> CursorPage[PlanResponse]:
-    """List retrieval plans, newest first."""
-    return await service.list_plans(
+) -> CursorPage[ProjectResponse]:
+    """List projects, newest first."""
+    return await service.list_projects(
         db, cursor=cursor, limit=limit, include_archived=include_archived
     )
 
 
-@router.get("/{name}", response_model=PlanResponse)
-async def get_plan(
+@router.get("/{name}", response_model=ProjectResponse)
+async def get_project(
     name: str,
     db: AsyncSession = Depends(get_db),
-) -> PlanResponse:
-    """Get a plan and its current version."""
-    return await service.get_plan(db, name)
+) -> ProjectResponse:
+    """Get a project and its current index config."""
+    return await service.get_project(db, name)
 
 
-@router.post("/{name}/versions", status_code=201, response_model=PlanVersionResponse)
-async def create_version(
+@router.post("/{name}/index-configs", status_code=201, response_model=IndexConfigResponse)
+async def create_index_config(
     name: str,
-    request: CreateVersionRequest,
+    request: CreateIndexConfigRequest,
     db: AsyncSession = Depends(get_db),
-) -> PlanVersionResponse:
+) -> IndexConfigResponse:
     """
-    Create a new immutable version of a plan.
-    Returns HTTP 409 if the config is identical to an existing version.
+    Create a new immutable index config for a project.
+    Returns HTTP 409 if the config is identical to an existing one.
     """
-    return await service.create_version(db, name, request)
+    return await service.create_index_config(db, name, request)
 
 
-@router.get("/{name}/versions", response_model=list[PlanVersionResponse])
-async def list_versions(
+@router.get("/{name}/index-configs", response_model=list[IndexConfigResponse])
+async def list_index_configs(
     name: str,
     db: AsyncSession = Depends(get_db),
-) -> list[PlanVersionResponse]:
-    """List all versions of a plan, oldest first."""
-    return await service.list_versions(db, name)
+) -> list[IndexConfigResponse]:
+    """List all index configs for a project, oldest first."""
+    return await service.list_index_configs(db, name)
 
 
-@router.get("/{name}/versions/{version_num}", response_model=PlanVersionResponse)
-async def get_version(
+@router.get("/{name}/index-configs/{version_num}", response_model=IndexConfigResponse)
+async def get_index_config(
     name: str,
     version_num: int,
     db: AsyncSession = Depends(get_db),
-) -> PlanVersionResponse:
-    """Get a specific version of a plan."""
-    return await service.get_version(db, name, version_num)
+) -> IndexConfigResponse:
+    """Get a specific index config version."""
+    return await service.get_index_config(db, name, version_num)
 
 
-@router.post("/{name}/clone", status_code=201, response_model=PlanResponse)
-async def clone_plan(
+@router.post("/{name}/clone", status_code=201, response_model=ProjectResponse)
+async def clone_project(
     name: str,
-    request: ClonePlanRequest,
+    request: CloneProjectRequest,
     db: AsyncSession = Depends(get_db),
-) -> PlanResponse:
+) -> ProjectResponse:
     """
-    Clone a plan's current version as version 1 of a new plan.
+    Clone a project's current index config as version 1 of a new project.
     The clone shares no state with the source after creation.
     """
-    return await service.clone_plan(db, name, request)
+    return await service.clone_project(db, name, request)
 
 
 @router.delete("/{name}", status_code=204)
-async def archive_plan(
+async def archive_project(
     name: str,
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """Soft-delete (archive) a plan. Archived plans cannot receive new versions."""
-    await service.archive_plan(db, name)
+    """Soft-delete (archive) a project. Archived projects cannot receive new index configs."""
+    await service.archive_project(db, name)

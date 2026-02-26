@@ -161,12 +161,12 @@ def create_app() -> FastAPI:
     from retrieval_os.ingestion.router import router as ingestion_router
     from retrieval_os.intelligence.router import router as intelligence_router
     from retrieval_os.lineage.router import router as lineage_router
-    from retrieval_os.plans.router import router as plans_router
+    from retrieval_os.plans.router import router as projects_router
     from retrieval_os.tenants.router import router as tenants_router
     from retrieval_os.webhooks.router import router as webhooks_router
 
     app.include_router(health_router)
-    app.include_router(plans_router)
+    app.include_router(projects_router)
     app.include_router(deployments_router)
     app.include_router(serving_router)
     app.include_router(multimodal_router)

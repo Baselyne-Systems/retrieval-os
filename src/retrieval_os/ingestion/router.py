@@ -2,9 +2,9 @@
 
 Routes
 ------
-POST   /v1/plans/{plan}/ingest            — submit a new ingestion job
-GET    /v1/plans/{plan}/ingest            — list jobs for a plan
-GET    /v1/plans/{plan}/ingest/{job_id}   — get a single job
+POST   /v1/projects/{project}/ingest            — submit a new ingestion job
+GET    /v1/projects/{project}/ingest            — list jobs for a project
+GET    /v1/projects/{project}/ingest/{job_id}   — get a single job
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from retrieval_os.ingestion.schemas import (
 )
 from retrieval_os.ingestion.service import create_ingestion_job
 
-router = APIRouter(prefix="/v1/plans/{plan_name}/ingest", tags=["ingestion"])
+router = APIRouter(prefix="/v1/projects/{plan_name}/ingest", tags=["ingestion"])
 
 
 @router.post("", response_model=IngestionJobResponse, status_code=202)

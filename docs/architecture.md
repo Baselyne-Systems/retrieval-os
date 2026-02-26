@@ -8,25 +8,27 @@ Retrieval-OS is a production control plane for RAG and semantic search systems. 
 
 Before reading the technical design, it helps to understand what each concept maps to from a user's perspective.
 
-### Plan
+### Project
 
-A **Plan** is the complete specification for a retrieval pipeline: which embedding model encodes queries and documents, how documents are chunked before indexing, which vector collection they go into, how many results to retrieve, whether to rerank, and cache settings.
+A **Project** is a named container for a retrieval use case — think "docs-search", "product-catalog", or "support-tickets". It holds metadata and provides the namespace under which all index configs, deployments, ingestion jobs, and eval runs are scoped.
 
-When you want to change any of these — swap the model, tighten chunking, add a reranker — you create a new **version** of the Plan. The previous version is preserved and still queryable. Versions are numbered sequentially and are immutable once created. Think of them as commits to your retrieval configuration.
+### IndexConfig
+
+An **IndexConfig** is an immutable, versioned snapshot of how to *build* the index: embedding model, vector dimensions, which collection to use, distance metric, quantization. These are the build-time settings. Changing any of them requires re-ingesting documents into the new index. Versions are numbered sequentially and serve as the shared reference between ingestion and the serving path — the embedding model that encodes documents at ingest time must match the model that encodes queries at retrieval time.
 
 ### Deployment
 
-A **Deployment** activates a plan version for live traffic. You can deploy instantly (100% traffic switch) or gradually (start at a low traffic weight, advance automatically on a schedule, promote to full traffic when stable). At most one deployment is live per plan at any time.
+A **Deployment** activates an index config for live traffic and carries the *search config* — the runtime tuning that does not touch the index: `top_k`, `reranker`, `hybrid_alpha`, cache settings, metadata filters. You can deploy instantly (100% traffic switch) or gradually (start at a low traffic weight, advance automatically on a schedule, promote to full traffic when stable). At most one deployment is live per project at any time.
 
-Deployments are the gate between "a config I wrote" and "a config serving real queries". The deployment record captures when a version went live, what traffic share it held, and — if it was rolled back — why.
+Deployments separate "what index" (IndexConfig FK) from "how to search it" (search config on the Deployment itself). Two deployments can reference the same IndexConfig with different top-k or reranker configs without re-indexing.
 
 ### Ingestion Job
 
-An **Ingestion Job** loads documents into the vector index using a specific plan version's settings. You push documents via API; the system chunks them, embeds them, and upserts the vectors into the correct collection. The ingestion job records which plan version processed each document, so the index always has a clear provenance chain.
+An **Ingestion Job** loads documents into the vector index using a specific IndexConfig's embedding settings. You push documents via API; the system chunks them, embeds them using the IndexConfig's model, and upserts the vectors into the correct collection. The ingestion job records which IndexConfig version processed each document, so the index always has a clear provenance chain.
 
 ### Evaluation Job
 
-An **Evaluation Job** measures retrieval quality for a deployed plan version. You provide labelled query–document pairs (ground truth); the system runs each query through the live retrieval pipeline and computes Recall@k, MRR, and NDCG. Results are compared to the previous deployment's baseline. A drop beyond a configurable threshold fires a regression alert.
+An **Evaluation Job** measures retrieval quality for a project. You provide labelled query–document pairs (ground truth); the system runs each query through the live retrieval pipeline and computes Recall@k, MRR, and NDCG. Results are compared to the previous evaluation's baseline. A drop beyond a configurable threshold fires a regression alert.
 
 ### Deployment Guard-Rails
 
@@ -34,7 +36,7 @@ When creating a deployment, you can attach quality thresholds: a minimum Recall@
 
 ### Lineage
 
-Every artifact produced by the system — a chunked dataset, an embedding run, an index snapshot — is recorded as a node in a lineage graph, with directed edges linking parents to children. You can trace any document chunk in the index back to its source file, the embedding model that encoded it, and the plan version that owns it.
+Every artifact produced by the system — a chunked dataset, an embedding run, an index snapshot — is recorded as a node in a lineage graph, with directed edges linking parents to children. You can trace any document chunk in the index back to its source file, the embedding model that encoded it, and the IndexConfig version that owns it.
 
 ---
 
@@ -44,7 +46,7 @@ Retrieval-augmented systems break in silent ways. You swap an embedding model, r
 
 Retrieval-OS solves this by:
 
-1. Making every retrieval config an immutable, versioned object (a **Plan**)
+1. Separating *index config* (build-time) from *search config* (runtime) into distinct versioned objects
 2. Treating index changes as **Deployments** with traffic weights and rollback capability
 3. Measuring **Recall@k, MRR, NDCG** continuously against a held-out ground truth
 4. Tracking the full **lineage** from training dataset to deployed index
@@ -55,18 +57,18 @@ Retrieval-OS solves this by:
 ## Three Paths Through the System
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────────────┐
-│                                 API Gateway (FastAPI)                                 │
-│   /v1/query/{plan}   /v1/plans/{name}/ingest   /v1/plans   /v1/plans/{n}/deployments  │
-│   /health            /ready                    /metrics    /v1/info                   │
-└────────┬─────────────────────┬──────────────────────────┬────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                   API Gateway (FastAPI)                                       │
+│  /v1/query/{name}  /v1/projects/{name}/ingest  /v1/projects  /v1/projects/{n}/deployments    │
+│  /health           /ready                      /metrics      /v1/info                        │
+└────────┬─────────────────────┬──────────────────────────┬────────────────────────────────────┘
          │                     │                          │
   ╔══════▼══════╗       ╔══════▼══════╗           ╔══════▼══════╗
   ║ SERVING PATH ║       ║  INGESTION  ║           ║ MANAGEMENT  ║
   ║  P99 < 200ms ║       ║    PATH     ║           ║    PATH     ║
   ╚══════╤══════╝       ╚══════╤══════╝           ╚══════╤══════╝
          │                     │                          │
-  Query Router          Creates QUEUED            Plan Manager
+  Query Router          Creates QUEUED            Project Manager
   (Redis config read)   IngestionJob              (Postgres read/write)
          │                     │
   Retrieval Executor    Background runner          Deployment Controller
@@ -89,10 +91,10 @@ Retrieval-OS solves this by:
 The hot path processes a query end-to-end. P99 target: 200ms.
 
 ```
-POST /v1/query/{plan_name}
+POST /v1/query/{project_name}
         │
         ▼
- Redis GET ros:plan:{name}:current     ← cache miss → Postgres read, then cache
+ Redis GET ros:project:{name}:active   ← cache miss → Postgres read (active deployment + IndexConfig), then cache
         │
         ▼
  Redis GET ros:qcache:{sha256}         ← cache hit → return immediately
@@ -115,8 +117,8 @@ POST /v1/query/{plan_name}
 
 ### Serving path invariants
 
-- **No Postgres reads on the hot path.** Plan config lives in Redis (`ros:plan:{name}:current`, 30s TTL). A Postgres failure cannot cause query failures. On Redis miss, one Postgres read warms the cache.
-- **Plan validation at write time.** Every `PlanVersion` row in Postgres is guaranteed valid by the service layer. The serving path performs zero defensive checks.
+- **No Postgres reads on the hot path.** Serving config lives in Redis (`ros:project:{name}:active`, 30s TTL). A Postgres failure cannot cause query failures. On Redis miss, one Postgres read (active deployment + its IndexConfig) warms the cache.
+- **Config validation at write time.** Every `IndexConfig` and `Deployment` row in Postgres is guaranteed valid by the service layer. The serving path performs zero defensive checks.
 - **Usage records are non-blocking.** After every query, a fire-and-forget `asyncio.create_task()` writes a `usage_record` row. The response is returned before this completes.
 
 ---
@@ -126,10 +128,10 @@ POST /v1/query/{plan_name}
 Documents are loaded into the vector index asynchronously via a background job runner.
 
 ```
-POST /v1/plans/{name}/ingest
+POST /v1/projects/{name}/ingest
         │
         ▼
- Validate plan version exists (Postgres)
+ Validate IndexConfig version exists (Postgres)
         │
         ▼
  Create IngestionJob (status: QUEUED)
@@ -139,7 +141,7 @@ POST /v1/plans/{name}/ingest
         │  ingestion_job_runner polls every 5s
         │  SELECT FOR UPDATE SKIP LOCKED on ingestion_jobs WHERE status='QUEUED'
         ▼
- 1. Load plan version config from Postgres
+ 1. Load IndexConfig from Postgres
         │
         ▼
  2. Load documents
@@ -148,12 +150,12 @@ POST /v1/plans/{name}/ingest
         │
         ▼
  3. Chunk each document (word-boundary)
-    chunk_size and overlap come from the request (not the plan version)
-    each chunk carries: doc_id, chunk_idx, plan_name, plan_version, doc metadata
+    chunk_size and overlap come from the request (not the IndexConfig)
+    each chunk carries: doc_id, chunk_idx, plan_name, index_config_version, doc metadata
         │
         ▼
  4. For each batch of 50 chunks:
-    ├── embed_text → vectors  (uses plan version's provider + model)
+    ├── embed_text → vectors  (uses IndexConfig's provider + model)
     │         │
     │         └── [on first batch] ensure_collection in Qdrant
     │                              (creates collection if absent, using actual dimension)
@@ -165,7 +167,7 @@ POST /v1/plans/{name}/ingest
     DatasetSnapshot ──► EmbeddingArtifact ──► IndexArtifact
         │
         ▼
- 6. Fire webhook (plan.version_created) if indexed_chunks > 0
+ 6. Fire webhook (ingestion.completed) if indexed_chunks > 0
         │
         ▼
  7. Mark job COMPLETED (indexed_chunks, failed_chunks, total_chunks recorded)
@@ -176,8 +178,8 @@ POST /v1/plans/{name}/ingest
 
 - **Per-batch error isolation.** An embed or upsert failure on one batch does not abort the job. That batch's chunks are counted as `failed_chunks`; the remaining batches continue. The job reaches `COMPLETED` even if some chunks failed — allowing partial indexing.
 - **Collection auto-creation.** `ensure_collection` is called exactly once per job (before the first upsert), using the actual vector dimension inferred from the first embed result. If the collection already exists it is a no-op.
-- **Chunk payloads are queryable.** Every vector in Qdrant carries a payload with `doc_id`, `chunk_idx`, `plan_name`, `plan_version`, and all metadata from the source document. These are filterable at query time.
-- **Lineage is idempotent.** Re-running a job for the same plan version does not create duplicate lineage artifacts. Each artifact is keyed by its storage URI and skipped if it already exists.
+- **Chunk payloads are queryable.** Every vector in Qdrant carries a payload with `doc_id`, `chunk_idx`, `plan_name`, `index_config_version`, and all metadata from the source document. These are filterable at query time.
+- **Lineage is idempotent.** Re-running a job for the same IndexConfig version does not create duplicate lineage artifacts. Each artifact is keyed by its storage URI and skipped if it already exists.
 - **Horizontal scaling.** `SELECT FOR UPDATE SKIP LOCKED` means multiple API replicas can each run an ingestion runner without processing the same job twice.
 
 ---
@@ -188,9 +190,9 @@ The management path handles all writes to plans, deployments, and configuration.
 
 ### Management path invariants
 
-- **Version numbers are monotonic and gapless.** `SELECT FOR UPDATE` on the parent `RetrievalPlan` row serialises concurrent version creates.
-- **Identical configs are rejected.** `config_hash` = SHA-256 of behavioural fields. Duplicate hash → HTTP 409 before DB write.
-- **At most one live deployment per plan.** The service layer enforces this; there is no DB unique constraint to race against because the check + insert happen within a transaction with the parent plan row locked.
+- **IndexConfig version numbers are monotonic and gapless.** `SELECT FOR UPDATE` on the parent `Project` row serialises concurrent index config creates.
+- **Identical index configs are rejected.** `config_hash` = SHA-256 of index-relevant fields only. Duplicate hash → HTTP 409 before DB write.
+- **At most one live deployment per project.** The service layer enforces this; there is no DB unique constraint to race against because the check + insert happen within a transaction with the parent project row locked.
 
 ---
 
@@ -245,9 +247,9 @@ This means a transient DB error does not take down the API process.
 
 | Key pattern | Type | TTL | Written by | Read by |
 |---|---|---|---|---|
-| `ros:plan:{name}:current` | String (JSON) | 30s | Query router (cache miss), Deployment service (on activate) | Query router |
-| `ros:deployment:{name}:active` | String | 300s | Deployment service | Query router (Phase 4+) |
-| `ros:qcache:{sha256}` | String (JSON) | plan's `cache_ttl_seconds` | Retrieval executor (cache set) | Retrieval executor (cache get) |
+| `ros:project:{name}:active` | String (JSON) | 30s | Query router (cache miss), Deployment service (on activate) | Query router |
+| `ros:deployment:{name}:active` | String | 300s | Deployment service | Query router (cache miss fallback) |
+| `ros:qcache:{sha256}` | String (JSON) | deployment's `cache_ttl_seconds` | Retrieval executor (cache set) | Retrieval executor (cache get) |
 
 All Redis writes are fire-and-forget: failures are logged and swallowed, never surfaced to callers.
 
@@ -256,9 +258,9 @@ All Redis writes are fire-and-forget: failures are logged and swallowed, never s
 ## Database Layout
 
 ```
-retrieval_plans             — one row per named plan
-plan_versions               — one row per config snapshot
-deployments                 — one row per deploy attempt
+projects                    — one row per named retrieval project
+index_configs               — one row per immutable index config snapshot (build-time)
+deployments                 — one row per deploy attempt (search config + index FK + lifecycle)
 usage_records               — one row per query (fire-and-forget insert)
 
 [Phase 5]
@@ -302,17 +304,17 @@ def uuid7() -> uuid.UUID:
 
 `compute_config_hash()` produces a SHA-256 of the canonical JSON of the fields that define *retrieval behaviour*. Fields that only affect cost, caching, or governance are excluded.
 
-**Included in hash:**
-`embedding_provider`, `embedding_model`, `embedding_dimensions`, `modalities`, `index_backend`, `index_collection`, `distance_metric`, `quantization`, `top_k`, `rerank_top_k`, `reranker`, `hybrid_alpha`, `metadata_filters`
+**Included in hash (index-only fields):**
+`embedding_provider`, `embedding_model`, `embedding_dimensions`, `modalities`, `index_backend`, `index_collection`, `distance_metric`, `quantization`
 
-**Excluded from hash:**
-`cache_ttl_seconds`, `cache_enabled`, `max_tokens_per_query`, `change_comment`, `created_by`
+**Excluded from hash (now on Deployment or governance-only):**
+`top_k`, `rerank_top_k`, `reranker`, `hybrid_alpha`, `metadata_filters`, `cache_ttl_seconds`, `cache_enabled`, `max_tokens_per_query`, `change_comment`, `created_by`
 
 Lists are sorted before hashing so `["text", "image"]` and `["image", "text"]` produce the same hash.
 
 The hash serves two purposes:
-1. **Deduplication** — creating a version with identical retrieval behaviour to an existing version returns HTTP 409 (`DUPLICATE_CONFIG_HASH`) without a DB write.
-2. **Cross-plan eval sharing** — two plans with the same `config_hash` necessarily produce identical retrieval results. Eval runs can be shared (Phase 6).
+1. **Deduplication** — creating an IndexConfig with identical index settings to an existing one returns HTTP 409 (`DUPLICATE_CONFIG_HASH`) without a DB write.
+2. **Cross-project eval sharing** — two projects with the same `config_hash` necessarily use identical indexes. Eval runs can be shared.
 
 ---
 
@@ -375,7 +377,7 @@ Cache hit flow:
 
 Cache is bypassed when `cache_enabled = False` or `cache_ttl_seconds = 0`.
 
-Cache entries are keyed per **plan version**. Deploying a new plan version automatically invalidates because the version number is part of the key — no explicit flush needed.
+Cache entries are keyed per **index config version**. Deploying a new IndexConfig version automatically invalidates because the version number is part of the key — no explicit flush needed.
 
 ---
 
@@ -403,16 +405,16 @@ All errors inherit from `RetrievalOSError` which carries `status_code`, `error_c
 
 ```json
 {
-  "error": "PLAN_NOT_FOUND",
-  "message": "Plan 'my-docs' not found",
+  "error": "PROJECT_NOT_FOUND",
+  "message": "Project 'my-docs' not found",
   "detail": {}
 }
 ```
 
 | Class | HTTP | error_code |
 |---|---|---|
-| `PlanNotFoundError` | 404 | `PLAN_NOT_FOUND` |
-| `PlanVersionNotFoundError` | 404 | `PLAN_VERSION_NOT_FOUND` |
+| `ProjectNotFoundError` | 404 | `PROJECT_NOT_FOUND` |
+| `IndexConfigNotFoundError` | 404 | `INDEX_CONFIG_NOT_FOUND` |
 | `DeploymentNotFoundError` | 404 | `DEPLOYMENT_NOT_FOUND` |
 | `ConflictError` | 409 | `CONFLICT` |
 | `DuplicateConfigError` | 409 | `DUPLICATE_CONFIG_HASH` |

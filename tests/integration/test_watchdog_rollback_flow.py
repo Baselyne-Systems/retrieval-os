@@ -34,7 +34,7 @@ def _dep(
     *,
     dep_id: str = "dep-001",
     plan_name: str = "plan-a",
-    plan_version: int = 1,
+    index_config_version: int = 1,
     status: str = DeploymentStatus.ACTIVE.value,
     recall_threshold: float | None = None,
     error_threshold: float | None = None,
@@ -45,7 +45,7 @@ def _dep(
     return Deployment(
         id=dep_id,
         plan_name=plan_name,
-        plan_version=plan_version,
+        index_config_version=index_config_version,
         status=status,
         traffic_weight=traffic_weight,
         rollout_step_percent=rollout_step_percent,

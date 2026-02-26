@@ -20,8 +20,8 @@ from retrieval_os.core.exceptions import (
     ConflictError,
     DeploymentNotFoundError,
     DeploymentStateError,
-    PlanNotFoundError,
-    PlanVersionNotFoundError,
+    IndexConfigNotFoundError,
+    ProjectNotFoundError,
 )
 from retrieval_os.core.ids import uuid7
 from retrieval_os.deployments.models import Deployment, DeploymentStatus
@@ -33,31 +33,32 @@ from retrieval_os.deployments.schemas import (
 )
 from retrieval_os.deployments.traffic import clear_active_deployment, set_active_deployment
 from retrieval_os.evaluations.repository import eval_repo
-from retrieval_os.plans.repository import plan_repo
+from retrieval_os.plans.repository import project_repo
 from retrieval_os.webhooks.delivery import fire_webhook_event
 from retrieval_os.webhooks.events import WebhookEvent
 
 log = logging.getLogger(__name__)
 
 
-def _plan_config_from_version(plan_name: str, version: object) -> dict:
-    """Build the Redis plan config dict from a PlanVersion ORM object."""
+def _build_serving_config(plan_name: str, deployment: Deployment, index_config: object) -> dict:
+    """Build the Redis serving config dict by merging Deployment + IndexConfig."""
     return {
-        "plan_name": plan_name,
-        "version": version.version,
-        "embedding_provider": version.embedding_provider,
-        "embedding_model": version.embedding_model,
-        "embedding_normalize": version.embedding_normalize,
-        "embedding_batch_size": version.embedding_batch_size,
-        "index_backend": version.index_backend,
-        "index_collection": version.index_collection,
-        "distance_metric": version.distance_metric,
-        "top_k": version.top_k,
-        "reranker": version.reranker,
-        "rerank_top_k": version.rerank_top_k,
-        "metadata_filters": version.metadata_filters,
-        "cache_enabled": version.cache_enabled,
-        "cache_ttl_seconds": version.cache_ttl_seconds,
+        "project_name": plan_name,
+        "index_config_version": deployment.index_config_version,
+        "embedding_provider": index_config.embedding_provider,  # type: ignore[attr-defined]
+        "embedding_model": index_config.embedding_model,  # type: ignore[attr-defined]
+        "embedding_normalize": index_config.embedding_normalize,  # type: ignore[attr-defined]
+        "embedding_batch_size": index_config.embedding_batch_size,  # type: ignore[attr-defined]
+        "index_backend": index_config.index_backend,  # type: ignore[attr-defined]
+        "index_collection": index_config.index_collection,  # type: ignore[attr-defined]
+        "distance_metric": index_config.distance_metric,  # type: ignore[attr-defined]
+        "top_k": deployment.top_k,
+        "reranker": deployment.reranker,
+        "rerank_top_k": deployment.rerank_top_k,
+        "metadata_filters": deployment.metadata_filters,
+        "cache_enabled": deployment.cache_enabled,
+        "cache_ttl_seconds": deployment.cache_ttl_seconds,
+        "hybrid_alpha": deployment.hybrid_alpha,
     }
 
 
@@ -66,25 +67,28 @@ async def create_deployment(
     plan_name: str,
     request: CreateDeploymentRequest,
 ) -> DeploymentResponse:
-    # 1. Plan must exist and not be archived
-    plan = await plan_repo.get_by_name(session, plan_name)
-    if not plan:
-        raise PlanNotFoundError(f"Plan '{plan_name}' not found")
-    if plan.is_archived:
-        raise ConflictError(f"Plan '{plan_name}' is archived")
+    # 1. Project must exist and not be archived
+    project = await project_repo.get_by_name(session, plan_name)
+    if not project:
+        raise ProjectNotFoundError(f"Project '{plan_name}' not found")
+    if project.is_archived:
+        raise ConflictError(f"Project '{plan_name}' is archived")
 
-    # 2. Requested version must exist
-    version = await plan_repo.get_version(session, plan.id, request.plan_version)
-    if not version:
-        raise PlanVersionNotFoundError(
-            f"Version {request.plan_version} of plan '{plan_name}' not found"
+    # 2. Requested index config version must exist
+    index_config = await project_repo.get_index_config(
+        session, project.id, request.index_config_version
+    )
+    if not index_config:
+        raise IndexConfigNotFoundError(
+            f"Index config version {request.index_config_version} "
+            f"of project '{plan_name}' not found"
         )
 
     # 3. No other live deployment allowed
     existing = await deployment_repo.get_active_for_plan(session, plan_name)
     if existing:
         raise ConflictError(
-            f"Plan '{plan_name}' already has an active deployment "
+            f"Project '{plan_name}' already has an active deployment "
             f"(id={existing.id}, status={existing.status}). "
             "Rollback the current deployment before creating a new one."
         )
@@ -102,7 +106,17 @@ async def create_deployment(
     deployment = Deployment(
         id=str(uuid7()),
         plan_name=plan_name,
-        plan_version=request.plan_version,
+        index_config_id=index_config.id,
+        index_config_version=request.index_config_version,
+        top_k=request.top_k,
+        rerank_top_k=request.rerank_top_k,
+        reranker=request.reranker,
+        hybrid_alpha=request.hybrid_alpha,
+        metadata_filters=request.metadata_filters,
+        tenant_isolation_field=request.tenant_isolation_field,
+        cache_enabled=request.cache_enabled,
+        cache_ttl_seconds=request.cache_ttl_seconds,
+        max_tokens_per_query=request.max_tokens_per_query,
         status=DeploymentStatus.ROLLING_OUT.value if is_gradual else DeploymentStatus.PENDING.value,
         traffic_weight=0.0,
         rollout_step_percent=request.rollout_step_percent,
@@ -119,9 +133,9 @@ async def create_deployment(
 
     if not is_gradual:
         # Instant promotion to ACTIVE
-        deployment = await _activate(session, deployment, plan_name, version, now)
+        deployment = await _activate(session, deployment, plan_name, now)
 
-    plan_config = _plan_config_from_version(plan_name, version)
+    plan_config = _build_serving_config(plan_name, deployment, index_config)
     await set_active_deployment(plan_name, deployment.id, plan_config)
 
     metrics.deployment_status.labels(
@@ -143,7 +157,6 @@ async def _activate(
     session: AsyncSession,
     deployment: Deployment,
     plan_name: str,
-    version: object,
     now: datetime,
 ) -> Deployment:
     deployment.status = DeploymentStatus.ACTIVE.value
@@ -175,7 +188,7 @@ async def rollback_deployment(
         raise DeploymentNotFoundError(f"Deployment '{deployment_id}' not found")
     if deployment.plan_name != plan_name:
         raise DeploymentNotFoundError(
-            f"Deployment '{deployment_id}' does not belong to plan '{plan_name}'"
+            f"Deployment '{deployment_id}' does not belong to project '{plan_name}'"
         )
     if not deployment.is_live:
         raise DeploymentStateError(
@@ -228,15 +241,15 @@ async def get_deployment(
     deployment = await deployment_repo.get_by_id(session, deployment_id)
     if not deployment or deployment.plan_name != plan_name:
         raise DeploymentNotFoundError(
-            f"Deployment '{deployment_id}' not found for plan '{plan_name}'"
+            f"Deployment '{deployment_id}' not found for project '{plan_name}'"
         )
     return DeploymentResponse.model_validate(deployment)
 
 
 async def list_deployments(session: AsyncSession, plan_name: str) -> list[DeploymentResponse]:
-    plan = await plan_repo.get_by_name(session, plan_name)
-    if not plan:
-        raise PlanNotFoundError(f"Plan '{plan_name}' not found")
+    project = await project_repo.get_by_name(session, plan_name)
+    if not project:
+        raise ProjectNotFoundError(f"Project '{plan_name}' not found")
     deployments = await deployment_repo.list_for_plan(session, plan_name)
     return [DeploymentResponse.model_validate(d) for d in deployments]
 
@@ -310,11 +323,7 @@ async def _watchdog_rollback(
     deployment: Deployment,
     reason: str,
 ) -> None:
-    """Roll back a live deployment due to a guard-rail breach.
-
-    Bypasses the user-facing validation in ``rollback_deployment`` since the
-    caller already knows the deployment is live.
-    """
+    """Roll back a live deployment due to a guard-rail breach."""
     now = datetime.now(UTC)
     await deployment_repo.update_status(
         session,
@@ -355,15 +364,6 @@ async def _watchdog_rollback(
 async def check_rollback_thresholds(session: AsyncSession) -> int:
     """Trigger automatic rollback for live deployments that breach guard rails.
 
-    For each ACTIVE / ROLLING_OUT deployment that has thresholds configured,
-    loads the latest COMPLETED eval job for the same plan and checks:
-
-    - ``recall_at_5 < rollback_recall_threshold``  (if the threshold is set)
-    - ``failed_queries / total_queries > rollback_error_rate_threshold``
-      (if the threshold is set and total_queries > 0)
-
-    Triggers ``_watchdog_rollback`` on the first breach found per deployment.
-
     Returns the number of rollbacks triggered.
     """
     live = await deployment_repo.list_live(session)
@@ -373,11 +373,11 @@ async def check_rollback_thresholds(session: AsyncSession) -> int:
         has_recall = deployment.rollback_recall_threshold is not None
         has_error = deployment.rollback_error_rate_threshold is not None
         if not has_recall and not has_error:
-            continue  # no guard rails configured → skip
+            continue
 
         latest_eval = await eval_repo.get_latest_completed_for_plan(session, deployment.plan_name)
         if latest_eval is None:
-            continue  # no eval data yet → skip
+            continue
 
         should_rollback = False
         reason = ""

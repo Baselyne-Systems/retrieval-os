@@ -20,13 +20,13 @@ def _make_deployment(
     error_threshold: float | None = None,
     status: str = DeploymentStatus.ACTIVE.value,
     plan_name: str = "acme",
-    plan_version: int = 1,
+    index_config_version: int = 1,
 ) -> Deployment:
     now = datetime.now(UTC)
     return Deployment(
         id="dep-001",
         plan_name=plan_name,
-        plan_version=plan_version,
+        index_config_version=index_config_version,
         status=status,
         traffic_weight=1.0,
         rollback_recall_threshold=recall_threshold,

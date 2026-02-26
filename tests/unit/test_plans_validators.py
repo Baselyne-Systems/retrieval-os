@@ -1,4 +1,4 @@
-"""Unit tests for plan config validation and config hash computation."""
+"""Unit tests for index config validation and config hash computation."""
 
 import pytest
 
@@ -24,15 +24,6 @@ def _base_config(**overrides: object) -> dict:
         "index_collection": "docs",
         "distance_metric": "cosine",
         "quantization": None,
-        "top_k": 10,
-        "rerank_top_k": None,
-        "reranker": None,
-        "hybrid_alpha": None,
-        "metadata_filters": None,
-        "tenant_isolation_field": None,
-        "cache_enabled": True,
-        "cache_ttl_seconds": 3600,
-        "max_tokens_per_query": None,
         "change_comment": "",
     }
     cfg.update(overrides)
@@ -109,33 +100,6 @@ class TestValidatePlanConfig:
     def test_clip_supports_text_and_image(self) -> None:
         validate_plan_config(_base_config(embedding_provider="clip", modalities=["text", "image"]))
 
-    # top_k / rerank_top_k
-    def test_top_k_zero_raises(self) -> None:
-        with pytest.raises(AppValidationError) as exc_info:
-            validate_plan_config(_base_config(top_k=0))
-        assert "top_k" in exc_info.value.detail["errors"][0]
-
-    def test_rerank_top_k_greater_than_top_k_raises(self) -> None:
-        with pytest.raises(AppValidationError) as exc_info:
-            validate_plan_config(_base_config(top_k=10, rerank_top_k=20))
-        assert "rerank_top_k" in exc_info.value.detail["errors"][0]
-
-    def test_rerank_top_k_equal_to_top_k_passes(self) -> None:
-        validate_plan_config(_base_config(top_k=10, rerank_top_k=10))
-
-    def test_rerank_top_k_less_than_top_k_passes(self) -> None:
-        validate_plan_config(_base_config(top_k=20, rerank_top_k=5))
-
-    # hybrid_alpha
-    def test_hybrid_alpha_out_of_range_raises(self) -> None:
-        with pytest.raises(AppValidationError) as exc_info:
-            validate_plan_config(_base_config(hybrid_alpha=1.5))
-        assert "hybrid_alpha" in exc_info.value.detail["errors"][0]
-
-    def test_hybrid_alpha_boundaries_pass(self) -> None:
-        validate_plan_config(_base_config(hybrid_alpha=0.0))
-        validate_plan_config(_base_config(hybrid_alpha=1.0))
-
     # quantization
     def test_invalid_quantization_raises(self) -> None:
         with pytest.raises(AppValidationError) as exc_info:
@@ -146,12 +110,6 @@ class TestValidatePlanConfig:
         validate_plan_config(_base_config(quantization="scalar"))
         validate_plan_config(_base_config(quantization="product"))
 
-    # cache_ttl
-    def test_negative_cache_ttl_raises(self) -> None:
-        with pytest.raises(AppValidationError) as exc_info:
-            validate_plan_config(_base_config(cache_ttl_seconds=-1))
-        assert "cache_ttl_seconds" in exc_info.value.detail["errors"][0]
-
     # Multiple errors collected
     def test_multiple_errors_collected(self) -> None:
         with pytest.raises(AppValidationError) as exc_info:
@@ -159,10 +117,9 @@ class TestValidatePlanConfig:
                 _base_config(
                     embedding_provider="bad",
                     index_backend="bad",
-                    top_k=0,
                 )
             )
-        assert len(exc_info.value.detail["errors"]) >= 3
+        assert len(exc_info.value.detail["errors"]) >= 2
 
 
 # ── compute_config_hash ────────────────────────────────────────────────────────
@@ -174,8 +131,8 @@ class TestComputeConfigHash:
         assert compute_config_hash(cfg) == compute_config_hash(cfg)
 
     def test_different_config_different_hash(self) -> None:
-        h1 = compute_config_hash(_base_config(top_k=10))
-        h2 = compute_config_hash(_base_config(top_k=20))
+        h1 = compute_config_hash(_base_config(index_collection="docs_v1"))
+        h2 = compute_config_hash(_base_config(index_collection="docs_v2"))
         assert h1 != h2
 
     def test_hash_is_64_hex_chars(self) -> None:
@@ -198,12 +155,6 @@ class TestComputeConfigHash:
         )
         assert h1 == h2
 
-    def test_cost_config_excluded_from_hash(self) -> None:
-        """cache_ttl_seconds and cache_enabled changes don't change the hash."""
-        h1 = compute_config_hash(_base_config(cache_ttl_seconds=3600))
-        h2 = compute_config_hash(_base_config(cache_ttl_seconds=7200))
-        assert h1 == h2
-
     def test_change_comment_excluded_from_hash(self) -> None:
         h1 = compute_config_hash(_base_config(change_comment="first"))
         h2 = compute_config_hash(_base_config(change_comment="second"))
@@ -212,4 +163,9 @@ class TestComputeConfigHash:
     def test_model_change_changes_hash(self) -> None:
         h1 = compute_config_hash(_base_config(embedding_model="BAAI/bge-m3"))
         h2 = compute_config_hash(_base_config(embedding_model="text-embedding-3-large"))
+        assert h1 != h2
+
+    def test_collection_change_changes_hash(self) -> None:
+        h1 = compute_config_hash(_base_config(index_collection="col_v1"))
+        h2 = compute_config_hash(_base_config(index_collection="col_v2"))
         assert h1 != h2

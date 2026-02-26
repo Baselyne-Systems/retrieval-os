@@ -10,17 +10,17 @@ Retrieval-OS is the layer that closes that gap. It sits between your application
 
 ## The Workflow
 
-**1. Define your retrieval pipeline as a Plan.**
+**1. Create a Project and define its IndexConfig.**
 
-A Plan captures everything that determines how your retrieval works: embedding model, chunking settings, index collection, distance metric, top-k, reranking. It is versioned — every change creates a new version, and old versions remain queryable and reproducible.
+A Project is a named retrieval use case — "docs-search", "product-catalog", "support-tickets". Its IndexConfig captures the build-time settings that determine how the index is constructed: embedding model, vector dimensions, collection, distance metric. Configs are immutable and versioned — every state is preserved and reproducible.
 
-**2. Ingest your documents.**
+**2. Ingest your documents under that IndexConfig.**
 
-Push documents via API. The system chunks them using the Plan's settings, embeds them with the Plan's embedding model, and upserts the vectors into the Plan's index collection. The exact config used is recorded alongside the vectors.
+Push documents via API. The system chunks them, embeds each chunk using the IndexConfig's embedding model, and upserts the vectors into the configured collection. The ingestion job records which IndexConfig version it used, so you always know what config produced the index.
 
 **3. Deploy a version.**
 
-When a new version is ready, deploy it. You choose the mode:
+When a new IndexConfig is ready, deploy it. The deployment also carries the runtime search config — top-k, reranker, cache settings — so you can tune search behaviour without re-indexing. You choose the rollout mode:
 - **Instant** — full traffic switches immediately.
 - **Gradual** — start at 10%, increment automatically every N minutes, promote to full traffic when stable.
 
@@ -70,11 +70,11 @@ curl http://localhost:8000/ready
 # {"status":"ok","checks":{"postgres":"ok","redis":"ok"}}
 ```
 
-### Create a plan and run a query
+### Create a project and run a query
 
 ```bash
-# 1. Define your retrieval pipeline
-curl -X POST http://localhost:8000/v1/plans \
+# 1. Create a project with its first IndexConfig
+curl -X POST http://localhost:8000/v1/projects \
   -H 'Content-Type: application/json' \
   -d '{
     "name": "docs",
@@ -86,15 +86,15 @@ curl -X POST http://localhost:8000/v1/plans \
       "modalities": ["text"],
       "index_backend": "qdrant",
       "index_collection": "docs_v1",
-      "distance_metric": "cosine",
-      "top_k": 10
+      "distance_metric": "cosine"
     }
   }'
 
-# 2. Ingest documents
-curl -X POST http://localhost:8000/v1/plans/docs/ingest \
+# 2. Ingest documents into IndexConfig v1
+curl -X POST http://localhost:8000/v1/projects/docs/ingest \
   -H 'Content-Type: application/json' \
   -d '{
+    "index_config_version": 1,
     "created_by": "eng",
     "chunk_size": 512,
     "overlap": 64,
@@ -103,10 +103,10 @@ curl -X POST http://localhost:8000/v1/plans/docs/ingest \
     ]
   }'
 
-# 3. Deploy version 1
-curl -X POST http://localhost:8000/v1/plans/docs/deployments \
+# 3. Deploy IndexConfig v1 with search config
+curl -X POST http://localhost:8000/v1/projects/docs/deployments \
   -H 'Content-Type: application/json' \
-  -d '{"plan_version": 1, "created_by": "eng"}'
+  -d '{"index_config_version": 1, "top_k": 10, "created_by": "eng"}'
 
 # 4. Query
 curl -X POST http://localhost:8000/v1/query/docs \
@@ -144,32 +144,32 @@ No message broker. No separate worker process. All background work runs as async
 ## API Surface
 
 ```
-POST  /v1/query/{plan_name}                            Serve a retrieval query
+POST  /v1/query/{project_name}                              Serve a retrieval query
 
-POST   /v1/plans/{name}/ingest                         Ingest documents
-GET    /v1/plans/{name}/ingest/{job_id}                Check ingestion job status
+POST   /v1/projects/{name}/ingest                           Ingest documents
+GET    /v1/projects/{name}/ingest/{job_id}                  Check ingestion job status
 
-POST   /v1/plans                                       Create a plan
-GET    /v1/plans                                       List plans (cursor-paginated)
-GET    /v1/plans/{name}                                Get a plan
-DELETE /v1/plans/{name}                                Archive a plan
+POST   /v1/projects                                         Create a project
+GET    /v1/projects                                         List projects (cursor-paginated)
+GET    /v1/projects/{name}                                  Get a project
+DELETE /v1/projects/{name}                                  Archive a project
 
-POST   /v1/plans/{name}/versions                       Create a new version
-GET    /v1/plans/{name}/versions                       List all versions
-GET    /v1/plans/{name}/versions/{num}                 Get a specific version
+POST   /v1/projects/{name}/index-configs                    Create a new IndexConfig version
+GET    /v1/projects/{name}/index-configs                    List all IndexConfig versions
+GET    /v1/projects/{name}/index-configs/{num}              Get a specific version
 
-POST   /v1/plans/{name}/deployments                    Deploy a version
-GET    /v1/plans/{name}/deployments                    List deployments
-GET    /v1/plans/{name}/deployments/{id}               Get deployment status
-POST   /v1/plans/{name}/deployments/{id}/rollback      Roll back a deployment
+POST   /v1/projects/{name}/deployments                      Deploy an IndexConfig version
+GET    /v1/projects/{name}/deployments                      List deployments
+GET    /v1/projects/{name}/deployments/{id}                 Get deployment status
+POST   /v1/projects/{name}/deployments/{id}/rollback        Roll back a deployment
 
-POST   /v1/webhooks                                    Register a webhook
-GET    /v1/webhooks                                    List webhooks
-DELETE /v1/webhooks/{id}                               Remove a webhook
+POST   /v1/webhooks                                         Register a webhook
+GET    /v1/webhooks                                         List webhooks
+DELETE /v1/webhooks/{id}                                    Remove a webhook
 
 GET    /health
 GET    /ready
-GET    /metrics                                        Prometheus text format
+GET    /metrics                                             Prometheus text format
 ```
 
 ---
@@ -191,4 +191,4 @@ GET    /metrics                                        Prometheus text format
 | Webhooks | Done | HMAC-SHA256 signed event delivery with retry |
 | Ingestion | Done | Word-boundary chunker, embed→upsert pipeline, lineage auto-registration |
 
-**438 tests (387 unit + 51 integration), all passing. Linter clean (ruff).**
+**432 tests (381 unit + 51 integration), all passing. Linter clean (ruff).**

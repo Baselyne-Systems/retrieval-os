@@ -16,7 +16,7 @@ from retrieval_os.evaluations.models import EvalJob, EvalJobStatus
 from retrieval_os.evaluations.repository import eval_repo
 from retrieval_os.evaluations.runner import EvalResults, execute_eval_job, load_eval_dataset
 from retrieval_os.evaluations.schemas import EvalJobListResponse, EvalJobResponse
-from retrieval_os.plans.models import PlanVersion, RetrievalPlan
+from retrieval_os.plans.models import IndexConfig, Project
 from retrieval_os.webhooks.delivery import fire_webhook_event
 from retrieval_os.webhooks.events import WebhookEvent
 
@@ -29,19 +29,21 @@ _REGRESSION_THRESHOLD = 0.05
 _REGRESSION_METRICS = ("recall_at_5", "mrr", "ndcg_at_5")
 
 
-async def _load_plan_version(session: AsyncSession, plan_name: str, version: int) -> PlanVersion:
-    """Load a PlanVersion by (plan_name, version_number)."""
+async def _load_index_config(session: AsyncSession, plan_name: str, version: int) -> IndexConfig:
+    """Load an IndexConfig by (plan_name, version_number)."""
     result = await session.execute(
-        select(PlanVersion)
-        .join(RetrievalPlan, PlanVersion.plan_id == RetrievalPlan.id)
-        .where(RetrievalPlan.name == plan_name, PlanVersion.version == version)
+        select(IndexConfig)
+        .join(Project, IndexConfig.project_id == Project.id)
+        .where(Project.name == plan_name, IndexConfig.version == version)
     )
-    pv = result.scalar_one_or_none()
-    if pv is None:
-        from retrieval_os.core.exceptions import PlanVersionNotFoundError
+    ic = result.scalar_one_or_none()
+    if ic is None:
+        from retrieval_os.core.exceptions import IndexConfigNotFoundError
 
-        raise PlanVersionNotFoundError(f"Plan '{plan_name}' version {version} not found")
-    return pv
+        raise IndexConfigNotFoundError(
+            f"Project '{plan_name}' index config version {version} not found"
+        )
+    return ic
 
 
 async def queue_eval_job(
@@ -50,7 +52,7 @@ async def queue_eval_job(
 ) -> EvalJobResponse:
     """Create a new QUEUED eval job."""
     # Verify the plan version exists before queuing
-    await _load_plan_version(session, request.plan_name, request.plan_version)
+    await _load_index_config(session, request.plan_name, request.plan_version)
 
     job = EvalJob(
         id=str(uuid7()),
@@ -105,8 +107,8 @@ async def process_next_eval_job(session: AsyncSession) -> str | None:
     log.info("eval.job.started", extra={"job_id": job_id, "plan": job.plan_name})
 
     try:
-        # Load plan config (new nested session not needed — same tx is fine for reads)
-        pv = await _load_plan_version(session, job.plan_name, job.plan_version)
+        # Load index config (new nested session not needed — same tx is fine for reads)
+        ic = await _load_index_config(session, job.plan_name, job.plan_version)
 
         # Load dataset from S3
         records = await load_eval_dataset(job.dataset_uri)
@@ -121,20 +123,21 @@ async def process_next_eval_job(session: AsyncSession) -> str | None:
             return job_id
 
         # Execute retrieval for every query
+        # reranker/rerank_top_k live on Deployment (search config); eval tests raw retrieval
         results: EvalResults = await execute_eval_job(
             records,
             plan_name=job.plan_name,
             plan_version=job.plan_version,
-            embedding_provider=pv.embedding_provider,
-            embedding_model=pv.embedding_model,
-            embedding_normalize=pv.embedding_normalize,
-            embedding_batch_size=pv.embedding_batch_size,
-            index_backend=pv.index_backend,
-            index_collection=pv.index_collection,
-            distance_metric=pv.distance_metric,
+            embedding_provider=ic.embedding_provider,
+            embedding_model=ic.embedding_model,
+            embedding_normalize=ic.embedding_normalize,
+            embedding_batch_size=ic.embedding_batch_size,
+            index_backend=ic.index_backend,
+            index_collection=ic.index_collection,
+            distance_metric=ic.distance_metric,
             top_k=job.top_k,
-            reranker=pv.reranker,
-            rerank_top_k=pv.rerank_top_k,
+            reranker=None,
+            rerank_top_k=None,
         )
 
         # Regression detection against previous completed job

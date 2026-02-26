@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime
 
 import pytest
@@ -36,7 +37,8 @@ class TestDeploymentIsLive:
         now = datetime.now(UTC)
         return Deployment(
             plan_name="docs",
-            plan_version=1,
+            index_config_id=uuid.uuid4(),
+            index_config_version=1,
             status=status,
             traffic_weight=0.0,
             change_note="",
@@ -69,17 +71,19 @@ class TestDeploymentSchemas:
         from retrieval_os.deployments.schemas import CreateDeploymentRequest
 
         req = CreateDeploymentRequest(
-            plan_version=1,
+            index_config_version=1,
             created_by="alice",
         )
-        assert req.plan_version == 1
+        assert req.index_config_version == 1
         assert req.rollout_step_percent is None
+        assert req.top_k == 10
+        assert req.cache_enabled is True
 
     def test_create_request_gradual(self) -> None:
         from retrieval_os.deployments.schemas import CreateDeploymentRequest
 
         req = CreateDeploymentRequest(
-            plan_version=2,
+            index_config_version=2,
             rollout_step_percent=10.0,
             rollout_step_interval_seconds=60,
             created_by="alice",
@@ -87,11 +91,27 @@ class TestDeploymentSchemas:
         assert req.rollout_step_percent == 10.0
         assert req.rollout_step_interval_seconds == 60
 
-    def test_create_request_plan_version_must_be_positive(self) -> None:
+    def test_create_request_with_search_config(self) -> None:
+        from retrieval_os.deployments.schemas import CreateDeploymentRequest
+
+        req = CreateDeploymentRequest(
+            index_config_version=1,
+            top_k=20,
+            reranker="cross-encoder",
+            rerank_top_k=5,
+            cache_enabled=False,
+            created_by="alice",
+        )
+        assert req.top_k == 20
+        assert req.reranker == "cross-encoder"
+        assert req.rerank_top_k == 5
+        assert req.cache_enabled is False
+
+    def test_create_request_index_config_version_must_be_positive(self) -> None:
         from retrieval_os.deployments.schemas import CreateDeploymentRequest
 
         with pytest.raises(Exception):
-            CreateDeploymentRequest(plan_version=0, created_by="alice")
+            CreateDeploymentRequest(index_config_version=0, created_by="alice")
 
     def test_rollback_request_valid(self) -> None:
         from retrieval_os.deployments.schemas import RollbackRequest
@@ -118,4 +138,4 @@ class TestTrafficKeys:
     def test_plan_config_key_format(self) -> None:
         from retrieval_os.deployments.traffic import _plan_config_key
 
-        assert _plan_config_key("my-plan") == "ros:plan:my-plan:current"
+        assert _plan_config_key("my-plan") == "ros:project:my-plan:active"

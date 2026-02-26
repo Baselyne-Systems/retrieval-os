@@ -2,7 +2,7 @@
 
 Redis layout:
   ros:deployment:{plan_name}:active  →  deployment_id (string)
-  ros:plan:{plan_name}:current       →  JSON plan config (warmed by query_router)
+  ros:project:{plan_name}:active     →  JSON serving config (warmed by query_router)
 
 The serving path reads the plan config from Redis. When a deployment goes ACTIVE
 we push the resolved plan config there so the next query uses the new version
@@ -26,7 +26,7 @@ def _active_key(plan_name: str) -> str:
 
 
 def _plan_config_key(plan_name: str) -> str:
-    return f"ros:plan:{plan_name}:current"
+    return f"ros:project:{plan_name}:active"
 
 
 async def set_active_deployment(

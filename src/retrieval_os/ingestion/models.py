@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import JSON, DateTime, Integer, String, Text
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from retrieval_os.core.database import Base
@@ -25,7 +27,10 @@ class IngestionJob(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     plan_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    plan_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    index_config_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("index_configs.id"), nullable=False
+    )
+    index_config_version: Mapped[int] = mapped_column(Integer, nullable=False)
 
     # Source — one of source_uri (S3) or document_payload (inline JSON list)
     source_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
