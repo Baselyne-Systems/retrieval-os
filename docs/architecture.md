@@ -52,43 +52,139 @@ Retrieval-OS solves this by:
 
 ---
 
-## Two Paths Through the System
+## Three Paths Through the System
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     API Gateway (FastAPI)                        │
-│       /v1/query    /v1/plans    /v1/plans/{n}/deployments        │
-│       /health      /ready      /metrics      /v1/info            │
-└──────────┬───────────────────────────┬───────────────────────────┘
-           │                           │
-    ╔══════▼══════╗             ╔══════▼══════╗
-    ║ SERVING PATH ║             ║ MANAGEMENT  ║
-    ║  P99 < 200ms ║             ║    PATH     ║
-    ╚══════╤══════╝             ╚══════╤══════╝
-           │                           │
-    Query Router               Plan Manager
-    (Redis config read)        (Postgres read/write)
-           │
-    Retrieval Executor         Deployment Controller
-    (cache → embed → ANN)      (state machine + Redis weights)
-           │
-    Embed Router               Lineage Tracker       [Phase 5]
-    (ST / OpenAI)              (DAG + orphan detect)
-           │
-    Index Proxy                Eval Engine           [Phase 6]
-    (Qdrant gRPC)              (Recall@k, MRR, NDCG)
-           │
-    Redis Cache                Cost Intelligence     [Phase 7]
-    (SHA-256 keyed)            (usage aggregation)
+┌──────────────────────────────────────────────────────────────────────────────────────┐
+│                                 API Gateway (FastAPI)                                 │
+│   /v1/query/{plan}   /v1/plans/{name}/ingest   /v1/plans   /v1/plans/{n}/deployments  │
+│   /health            /ready                    /metrics    /v1/info                   │
+└────────┬─────────────────────┬──────────────────────────┬────────────────────────────┘
+         │                     │                          │
+  ╔══════▼══════╗       ╔══════▼══════╗           ╔══════▼══════╗
+  ║ SERVING PATH ║       ║  INGESTION  ║           ║ MANAGEMENT  ║
+  ║  P99 < 200ms ║       ║    PATH     ║           ║    PATH     ║
+  ╚══════╤══════╝       ╚══════╤══════╝           ╚══════╤══════╝
+         │                     │                          │
+  Query Router          Creates QUEUED            Plan Manager
+  (Redis config read)   IngestionJob              (Postgres read/write)
+         │                     │
+  Retrieval Executor    Background runner          Deployment Controller
+  (cache → embed → ANN) picks up job              (state machine + Redis)
+         │                     │
+  Embed Router          Chunk documents            Lineage Tracker
+  (ST / OpenAI)         Embed in batches           (DAG + orphan detect)
+         │                     │
+  Index Proxy           Upsert → Qdrant            Eval Engine
+  (Qdrant gRPC)         Register lineage           (Recall@k, MRR, NDCG)
+         │                     │
+  Redis Cache           Fire webhook               Cost Intelligence
+  (SHA-256 keyed)       Mark COMPLETED             (usage aggregation)
+```
+
+---
+
+## Serving Path
+
+The hot path processes a query end-to-end. P99 target: 200ms.
+
+```
+POST /v1/query/{plan_name}
+        │
+        ▼
+ Redis GET ros:plan:{name}:current     ← cache miss → Postgres read, then cache
+        │
+        ▼
+ Redis GET ros:qcache:{sha256}         ← cache hit → return immediately
+        │
+        ▼
+ embed_text(query)                     ← sentence-transformers or OpenAI
+        │
+        ▼
+ Qdrant ANN search (gRPC)              ← top-k nearest neighbours
+        │
+        ▼
+ (optional) rerank                     ← cross-encoder or Cohere
+        │
+        ▼
+ Redis SET ros:qcache:{sha256}
+        │
+        ▼
+ Return results + fire-and-forget usage_record write
 ```
 
 ### Serving path invariants
 
-These are not aspirational — they are enforced by construction:
-
-- **No Postgres reads on the hot path.** The query router reads plan config from Redis (`ros:plan:{name}:current`, 30s TTL). A Postgres failure cannot cause query failures. On Redis miss, one Postgres read occurs and the result is immediately cached.
-- **Plan validation at write time.** Every `PlanVersion` row in Postgres is guaranteed valid by the service layer. The serving path performs zero defensive checks on plan config.
+- **No Postgres reads on the hot path.** Plan config lives in Redis (`ros:plan:{name}:current`, 30s TTL). A Postgres failure cannot cause query failures. On Redis miss, one Postgres read warms the cache.
+- **Plan validation at write time.** Every `PlanVersion` row in Postgres is guaranteed valid by the service layer. The serving path performs zero defensive checks.
 - **Usage records are non-blocking.** After every query, a fire-and-forget `asyncio.create_task()` writes a `usage_record` row. The response is returned before this completes.
+
+---
+
+## Ingestion Path
+
+Documents are loaded into the vector index asynchronously via a background job runner.
+
+```
+POST /v1/plans/{name}/ingest
+        │
+        ▼
+ Validate plan version exists (Postgres)
+        │
+        ▼
+ Create IngestionJob (status: QUEUED)
+        │
+        │  ← HTTP 202 returned here — job runs in background
+        │
+        │  ingestion_job_runner polls every 5s
+        │  SELECT FOR UPDATE SKIP LOCKED on ingestion_jobs WHERE status='QUEUED'
+        ▼
+ 1. Load plan version config from Postgres
+        │
+        ▼
+ 2. Load documents
+    ├── inline: JSON array in request body
+    └── S3:     download JSONL from s3://bucket/key
+        │
+        ▼
+ 3. Chunk each document (word-boundary)
+    chunk_size and overlap come from the request (not the plan version)
+    each chunk carries: doc_id, chunk_idx, plan_name, plan_version, doc metadata
+        │
+        ▼
+ 4. For each batch of 50 chunks:
+    ├── embed_text → vectors  (uses plan version's provider + model)
+    │         │
+    │         └── [on first batch] ensure_collection in Qdrant
+    │                              (creates collection if absent, using actual dimension)
+    ├── upsert_vectors → Qdrant
+    └── [on embed/upsert failure] failed_chunks += batch_size, continue next batch
+        │
+        ▼
+ 5. Register lineage DAG (idempotent)
+    DatasetSnapshot ──► EmbeddingArtifact ──► IndexArtifact
+        │
+        ▼
+ 6. Fire webhook (plan.version_created) if indexed_chunks > 0
+        │
+        ▼
+ 7. Mark job COMPLETED (indexed_chunks, failed_chunks, total_chunks recorded)
+    [unrecoverable error at any step → FAILED with error_message]
+```
+
+### Ingestion path properties
+
+- **Per-batch error isolation.** An embed or upsert failure on one batch does not abort the job. That batch's chunks are counted as `failed_chunks`; the remaining batches continue. The job reaches `COMPLETED` even if some chunks failed — allowing partial indexing.
+- **Collection auto-creation.** `ensure_collection` is called exactly once per job (before the first upsert), using the actual vector dimension inferred from the first embed result. If the collection already exists it is a no-op.
+- **Chunk payloads are queryable.** Every vector in Qdrant carries a payload with `doc_id`, `chunk_idx`, `plan_name`, `plan_version`, and all metadata from the source document. These are filterable at query time.
+- **Lineage is idempotent.** Re-running a job for the same plan version does not create duplicate lineage artifacts. Each artifact is keyed by its storage URI and skipped if it already exists.
+- **Horizontal scaling.** `SELECT FOR UPDATE SKIP LOCKED` means multiple API replicas can each run an ingestion runner without processing the same job twice.
+
+---
+
+## Management Path
+
+The management path handles all writes to plans, deployments, and configuration. These operations are infrequent relative to queries and have no latency SLO.
 
 ### Management path invariants
 
@@ -112,11 +208,16 @@ FastAPI lifespan
   │     Finds all ROLLING_OUT deployments, advances traffic_weight by
   │     rollout_step_percent. Promotes to ACTIVE when weight reaches 1.0.
   │
-  ├── eval_job_runner()       every 5s       [activates Phase 6]
+  ├── ingestion_job_runner()  every 5s
+  │     SELECT FOR UPDATE SKIP LOCKED on ingestion_jobs WHERE status='QUEUED'.
+  │     Runs the full ingestion pipeline for one job per cycle:
+  │     chunk → embed → upsert → lineage → webhook → complete.
+  │
+  ├── eval_job_runner()       every 5s
   │     SELECT FOR UPDATE SKIP LOCKED on eval_jobs WHERE status='QUEUED'.
   │     Processes one job per cycle. State survives restarts via DB status column.
   │
-  └── cost_aggregator()       every 3600s    [activates Phase 7]
+  └── cost_aggregator()       every 3600s
         Groups usage_records by (plan_name, plan_version, hour).
         Upserts into cost_entries. Idempotent over restart.
 ```
