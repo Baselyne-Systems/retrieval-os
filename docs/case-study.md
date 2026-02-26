@@ -64,15 +64,17 @@ The cache-hit path is not meaningfully slower than a raw Redis GET. At 0.2 ms p5
 
 ### Throughput under concurrency
 
+All figures are for a **single node** (one Retrieval-OS process, one Qdrant instance, one Redis instance). QPS scales horizontally — add API server replicas for the serving layer, shard Qdrant for the ANN layer.
+
 | Scenario | QPS | Concurrency | Notes |
 |---|---|---|---|
 | 50 concurrent cache-miss queries | 953 QPS | 50 | All unique queries, Qdrant hit per query |
 | 50 concurrent cache-hit queries | **21,975 QPS** | 50 | All identical, Redis only |
 | Peak realistic Zipf workload | **10,785 QPS** | 50 | s=1.2, 200-query corpus, 81.4% hit rate |
 
-The realistic workload number is the one that matters. With a Zipf(s=1.2) query distribution — which models typical search traffic where a power-law minority of queries account for most volume — the system measured an **81.4% natural cache hit rate** and **10,785 QPS at 50 concurrent workers**, all without a single query error.
+The realistic workload number is the one that matters. With a Zipf(s=1.2) query distribution — which models typical search traffic where a power-law minority of queries account for most volume — the system measured an **81.4% natural cache hit rate** and **10,785 QPS on a single node at 50 concurrent workers**, all without a single query error.
 
-### Sustained 30-second run
+### Sustained 30-second run (single node)
 
 | Path | QPS | Total queries | Errors | p99 |
 |---|---|---|---|---|
@@ -262,7 +264,7 @@ Three questions typically decide whether a retrieval system becomes a liability:
 
 **Will we know when retrieval quality degrades before our users do?** Yes, if you supply a ground-truth eval dataset. Activation auto-queues an eval job. The watchdog monitors results and rolls back automatically if quality drops below your threshold. The loop is closed without anyone watching a dashboard.
 
-**How much will this cost to operate?** The cache eliminates most embedding API spend. In the Zipf workload test, 81.4% of queries never touched the embedding API or the vector index — they were served from Redis in 0.2 ms. At scale, that ratio translates directly to OpenAI/Cohere API cost reduction. The ingestion dedup feature means CI/CD re-deploys do not re-bill you for embeddings you already paid for.
+**How much will this cost to operate?** The cache eliminates most embedding API spend. In the Zipf workload test, 81.4% of queries never touched the embedding API or the vector index — they were served from Redis in 0.2 ms on a single node. That ratio translates directly to OpenAI/Cohere API cost reduction and scales with however many nodes you run. The ingestion dedup feature means CI/CD re-deploys do not re-bill you for embeddings you already paid for.
 
 ---
 
