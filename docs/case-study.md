@@ -34,7 +34,23 @@ The serving path itself never touches Postgres during a query. The active deploy
 
 ## The numbers, measured on real infrastructure
 
-All numbers below are from the test suite running against live containers: Postgres 16, Redis 7.2, Qdrant 1.9. Embedding latency is excluded and noted separately — it is additive and hardware-dependent.
+**Test environment:**
+
+| Component | Version / Spec |
+|---|---|
+| Host | Apple M4, 16 GB RAM, macOS 15 |
+| Python | 3.12.12 |
+| FastAPI | 0.133.0 |
+| SQLAlchemy | 2.0.47 |
+| qdrant-client | 1.17.0 |
+| Postgres | 16 (Docker, no resource limits) |
+| Redis | 7.2-alpine (Docker, no resource limits) |
+| Qdrant | v1.9.2 (Docker, no resource limits) |
+| Network | All services on localhost via Docker bridge — no WAN latency |
+
+All services ran in Docker containers on the same machine as the test process. No resource limits were applied to any container. This is a developer laptop environment, not a data-centre rack. Production deployments across separate hosts with real network RTT between services will see higher absolute latencies, but the relative ratios (cache hit vs miss, sequential vs concurrent) hold.
+
+Embedding latency is excluded from every measurement below and noted separately — it is additive and hardware-dependent.
 
 ### Query latency — direct executor path (embedding stubbed)
 
