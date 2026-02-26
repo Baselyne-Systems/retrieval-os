@@ -41,10 +41,10 @@ Attach thresholds to a deployment: minimum Recall@5, maximum error rate. The wat
 | **Versioned retrieval configs** | Every change to model, chunking, index, or reranking is a numbered version. Reproduce any historical config exactly. Compare versions. Revert in one API call. |
 | **Gradual rollouts** | Traffic-weighted canary deployments that advance automatically. Roll back instantly if something goes wrong. |
 | **Automatic quality guard-rails** | Set Recall@5 or error-rate thresholds. Rollback happens automatically when they breach — the eval loop runs continuously without human involvement. |
-| **Document ingestion** | REST API for pushing documents. Chunks, embeds, and upserts using the active plan version's exact settings. Lineage is recorded automatically. |
-| **Full artifact lineage** | Every document chunk traces back to its source dataset, embedding run, and plan version. Answer "what was in the index when that query was served?" |
+| **Document ingestion** | REST API for pushing documents. Chunks, embeds, and upserts using the active index config's exact settings. Lineage is recorded automatically. |
+| **Full artifact lineage** | Every document chunk traces back to its source dataset, embedding run, and index config version. Answer "what was in the index when that query was served?" |
 | **Retrieval quality metrics** | Recall@k, MRR, NDCG tracked per deployment. Regression detection against the previous baseline. |
-| **Cost intelligence** | Per-plan embed token spend, cache hit ratio, and actionable optimisation recommendations. |
+| **Cost intelligence** | Per-project embed token spend, cache hit ratio, and actionable optimisation recommendations. |
 | **Multi-tenancy** | API key auth, per-tenant rate limiting, tenant-scoped index isolation. |
 | **Observability** | Full OpenTelemetry traces per query, Prometheus metrics, structured JSON logs. |
 | **Webhooks** | Signed HMAC-SHA256 event delivery for deployments, rollbacks, eval regressions, and ingestion completions. |
@@ -179,12 +179,12 @@ GET    /metrics                                             Prometheus text form
 | Phase | Status | What it adds |
 |---|---|---|
 | Foundation | Done | FastAPI app, infra stack, OTel, Prometheus, structured logs |
-| Plans | Done | Versioned pipeline configs, validation, config hash deduplication |
+| Projects & Index Configs | Done | Versioned pipeline configs, validation, config hash deduplication |
 | Serving | Done | Redis cache → embed → Qdrant ANN → response |
 | Deployments | Done | State machine, gradual rollouts, rollback watchdog |
 | Lineage | Done | Artifact DAG, dataset → embedding → index traceability |
 | Evaluation | Done | Recall@k, MRR, NDCG, eval job runner, regression detection |
-| Cost Intelligence | Done | Usage aggregation, cost per plan, optimisation recommendations |
+| Cost Intelligence | Done | Usage aggregation, cost per project, optimisation recommendations |
 | Production Hardening | Done | Circuit breakers, cross-modal RRF, K8s manifests, load tests |
 | Multimodal | Done | CLIP image embed, Whisper audio→text, sparse BM25 |
 | Multi-tenancy | Done | API key auth, rate limiting, tenant isolation |
