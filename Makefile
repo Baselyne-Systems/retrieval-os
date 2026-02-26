@@ -1,4 +1,4 @@
-.PHONY: dev infra test lint fmt migrate shell help
+.PHONY: dev infra test lint fmt migrate shell help test-load
 
 PYTHON := python
 UV := uv
@@ -9,7 +9,9 @@ help:
 	@echo "  dev       Start full stack (infra + api)"
 	@echo "  infra     Start infra only (postgres, redis, qdrant, minio, prometheus, grafana, jaeger)"
 	@echo "  stop      Stop all containers"
-	@echo "  test      Run test suite"
+	@echo "  test      Run full test suite (unit + integration)"
+	@echo "  test-e2e  Run e2e tests (requires live infra: make infra && make migrate)"
+	@echo "  test-benchmarks  Run pure-function benchmark tests"
 	@echo "  lint      Run ruff + mypy"
 	@echo "  fmt       Auto-format with ruff"
 	@echo "  migrate   Run pending Alembic migrations"
@@ -40,6 +42,15 @@ test-unit:
 
 test-integration:
 	$(UV) run pytest tests/integration -v
+
+test-e2e:
+	$(UV) run pytest tests/e2e -v --tb=short
+
+test-benchmarks:
+	$(UV) run pytest tests/benchmarks -v --tb=short
+
+test-load:
+	$(UV) run pytest tests/load -v --tb=short
 
 lint:
 	$(UV) run ruff check src tests

@@ -53,10 +53,14 @@ async def set_active_deployment(
 
 
 async def clear_active_deployment(project_name: str) -> None:
-    """Remove the active deployment marker (used on rollback)."""
+    """Remove the active deployment marker and serving config cache (used on rollback).
+
+    Both keys must be cleared together so queries immediately stop serving
+    the rolled-back deployment's config instead of waiting for the TTL to expire.
+    """
     redis = await get_redis()
     try:
-        await redis.delete(_active_key(project_name))
+        await redis.delete(_active_key(project_name), _project_config_key(project_name))
     except Exception:
         log.warning("traffic.clear_active_failed", extra={"project": project_name})
 

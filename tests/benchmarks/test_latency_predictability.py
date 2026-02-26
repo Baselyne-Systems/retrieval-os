@@ -66,7 +66,7 @@ _SERVING_CONFIG_JSON = json.dumps(_SERVING_CONFIG, default=str)
 
 
 class TestServingConfigJsonRoundTrip:
-    def test_10k_json_deserialise_under_500ms(self) -> None:
+    def test_10k_json_deserialise_under_500ms(self, record_bm) -> None:
         """Deserialising a serving config JSON string 10 000 times must take < 500 ms.
 
         The query router does this on every query where the config is in Redis.
@@ -79,13 +79,14 @@ class TestServingConfigJsonRoundTrip:
             config = json.loads(raw)
         elapsed = time.perf_counter() - start
 
+        record_bm("10k JSON deserialise (serving config)", elapsed, limit_s=0.5, n=10_000)
         assert elapsed < 0.5, (
             f"10 000 JSON deserialise ops took {elapsed:.3f}s; must be < 0.5s "
             f"({elapsed / 10_000 * 1_000:.4f} ms/op)"
         )
         assert config["project_name"] == "docs"
 
-    def test_10k_json_serialise_under_500ms(self) -> None:
+    def test_10k_json_serialise_under_500ms(self, record_bm) -> None:
         """Serialising a serving config dict 10 000 times must take < 500 ms.
 
         The query router writes the config to Redis on every cache-miss path.
@@ -95,6 +96,7 @@ class TestServingConfigJsonRoundTrip:
             json.dumps(_SERVING_CONFIG, default=str)
         elapsed = time.perf_counter() - start
 
+        record_bm("10k JSON serialise (serving config)", elapsed, limit_s=0.5, n=10_000)
         assert elapsed < 0.5, (
             f"10 000 JSON serialise ops took {elapsed:.3f}s; must be < 0.5s "
             f"({elapsed / 10_000 * 1_000:.4f} ms/op)"
@@ -114,7 +116,7 @@ class TestServingConfigJsonRoundTrip:
 
 
 class TestRedisKeyDerivation:
-    def test_100k_key_derivations_under_100ms(self) -> None:
+    def test_100k_key_derivations_under_100ms(self, record_bm) -> None:
         """Deriving 100 000 Redis keys must take < 100 ms.
 
         _project_redis_key is called once per query in the hot path. At 10 000 QPS
@@ -128,6 +130,7 @@ class TestRedisKeyDerivation:
             _project_redis_key(name)
         elapsed = time.perf_counter() - start
 
+        record_bm("100k Redis key derivations", elapsed, limit_s=0.1, n=100_000, unit="key")
         assert elapsed < 0.1, (
             f"100 000 Redis key derivations took {elapsed * 1000:.2f}ms; must be < 100ms "
             f"({elapsed / 100_000 * 1_000_000:.2f} µs/key)"
@@ -171,7 +174,7 @@ class TestServingConfigMerge:
             hybrid_alpha=None,
         )
 
-    def test_100k_merges_under_500ms(self) -> None:
+    def test_100k_merges_under_500ms(self, record_bm) -> None:
         """Building a serving config dict from IndexConfig + Deployment 100 000 times
         must take < 500 ms.
 
@@ -189,6 +192,7 @@ class TestServingConfigMerge:
             _build_serving_config("my-docs", deployment, index_config)
         elapsed = time.perf_counter() - start
 
+        record_bm("100k serving config merges", elapsed, limit_s=0.5, n=100_000, unit="merge")
         assert elapsed < 0.5, (
             f"100 000 serving config merges took {elapsed:.3f}s; must be < 0.5s "
             f"({elapsed / 100_000 * 1_000:.4f} ms/merge)"

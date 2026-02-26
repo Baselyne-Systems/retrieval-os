@@ -20,7 +20,12 @@ def get_redis_pool() -> aioredis.ConnectionPool:
     return _pool
 
 
-def get_redis() -> aioredis.Redis:  # type: ignore[type-arg]
+async def get_redis() -> aioredis.Redis:  # type: ignore[type-arg]
+    """Return the shared async Redis client.
+
+    Defined as async so every call site can uniformly ``await get_redis()``
+    without knowing whether the client is already initialised.
+    """
     global _client
     if _client is None:
         _client = aioredis.Redis(connection_pool=get_redis_pool())
@@ -30,7 +35,8 @@ def get_redis() -> aioredis.Redis:  # type: ignore[type-arg]
 async def check_redis_connection() -> bool:
     """Returns True if Redis is reachable."""
     try:
-        await get_redis().ping()
+        redis = await get_redis()
+        await redis.ping()
         return True
     except Exception:
         return False

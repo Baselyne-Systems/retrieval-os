@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
     # ── Redis ─────────────────────────────────────────────────────────────────
     redis_url: str = "redis://localhost:6379/0"
-    redis_pool_size: int = 10
+    redis_pool_size: int = 50
     redis_socket_timeout: float = 5.0
 
     # ── S3 / MinIO ────────────────────────────────────────────────────────────

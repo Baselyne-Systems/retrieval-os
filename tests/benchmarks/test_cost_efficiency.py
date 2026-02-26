@@ -39,7 +39,7 @@ from retrieval_os.serving.cache import _cache_key
 
 
 class TestCacheKeyThroughput:
-    def test_100k_keys_under_2s(self) -> None:
+    def test_100k_keys_under_2s(self, record_bm) -> None:
         """100 000 cache key generations must complete in < 2 seconds.
 
         At 10 000 QPS each request generates one cache key. 100 000 keys
@@ -56,6 +56,9 @@ class TestCacheKeyThroughput:
             _cache_key(project, version, query, top_k)
         elapsed = time.perf_counter() - start
 
+        record_bm(
+            "100k cache key generations (SHA-256)", elapsed, limit_s=2.0, n=100_000, unit="key"
+        )
         assert elapsed < 2.0, (
             f"100 000 cache key generations took {elapsed:.3f}s; must be < 2s "
             f"({elapsed / 100_000 * 1_000:.4f} ms/key)"

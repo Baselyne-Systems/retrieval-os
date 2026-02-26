@@ -87,7 +87,7 @@ def _make_eval_dataset_bytes(n_records: int) -> bytes:
 
 
 class TestRecallThroughput:
-    def test_recall_at_5_for_10k_queries_under_500ms(self) -> None:
+    def test_recall_at_5_for_10k_queries_under_500ms(self, record_bm) -> None:
         """Recall@5 across a 10 000-query eval set must complete in < 500 ms.
 
         At this speed, a continuous eval loop can evaluate 10 000 queries
@@ -103,6 +103,7 @@ class TestRecallThroughput:
         ]
         elapsed = time.perf_counter() - start
 
+        record_bm("Recall@5 across 10k queries", elapsed, limit_s=0.5, n=10_000, unit="query")
         assert elapsed < 0.5, (
             f"Recall@5 for 10 000 queries took {elapsed:.3f}s; must be < 0.5s "
             f"({elapsed / 10_000 * 1000:.4f} ms/query)"
@@ -131,7 +132,7 @@ class TestRecallThroughput:
 
 
 class TestMRRThroughput:
-    def test_mrr_for_10k_queries_under_500ms(self) -> None:
+    def test_mrr_for_10k_queries_under_500ms(self, record_bm) -> None:
         """MRR aggregation across 10 000 queries must complete in < 500 ms."""
         results = [_make_retrieval_result(hit_positions=[0, 3, 7]) for _ in range(10_000)]
 
@@ -139,6 +140,7 @@ class TestMRRThroughput:
         mrr = compute_mrr(results)
         elapsed = time.perf_counter() - start
 
+        record_bm("MRR across 10k queries", elapsed, limit_s=0.5, n=10_000, unit="query")
         assert elapsed < 0.5, f"MRR for 10 000 queries took {elapsed:.3f}s; must be < 0.5s"
         # First hit at rank 0 (position 0) → RR = 1.0 → MRR ≈ 1.0
         assert mrr == pytest.approx(1.0)
@@ -155,7 +157,7 @@ class TestMRRThroughput:
 
 
 class TestNDCGThroughput:
-    def test_ndcg_at_5_for_10k_queries_under_1s(self) -> None:
+    def test_ndcg_at_5_for_10k_queries_under_1s(self, record_bm) -> None:
         """NDCG@5 across 10 000 queries must complete in < 1 second.
 
         NDCG is the most compute-intensive metric (sorting + log). At 0.1 ms/query
@@ -173,6 +175,7 @@ class TestNDCGThroughput:
         scores = [compute_ndcg_at_k(ret, scores, k=5) for ret, scores in queries]
         elapsed = time.perf_counter() - start
 
+        record_bm("NDCG@5 across 10k queries", elapsed, limit_s=1.0, n=10_000, unit="query")
         assert elapsed < 1.0, (
             f"NDCG@5 for 10 000 queries took {elapsed:.3f}s; must be < 1s "
             f"({elapsed / 10_000 * 1000:.4f} ms/query)"
@@ -184,7 +187,7 @@ class TestNDCGThroughput:
 
 
 class TestEvalDatasetParsingThroughput:
-    def test_parse_50k_records_under_3s(self) -> None:
+    def test_parse_50k_records_under_3s(self, record_bm) -> None:
         """50 000 JSONL eval records must parse in < 3 seconds.
 
         A production eval dataset with 50 000 labelled queries (~5 MB of JSONL)
@@ -197,6 +200,7 @@ class TestEvalDatasetParsingThroughput:
         elapsed = time.perf_counter() - start
 
         assert len(records) == 50_000
+        record_bm("Parse 50k JSONL eval records", elapsed, limit_s=3.0, n=50_000, unit="record")
         assert elapsed < 3.0, (
             f"Parsing 50 000 JSONL records took {elapsed:.3f}s; must be < 3s "
             f"({elapsed / 50_000 * 1000:.4f} ms/record)"
@@ -247,7 +251,7 @@ class TestRegressionDetection:
                     f"expected no regression, got {result}"
                 )
 
-    def test_regression_detection_scales_linearly_with_metric_count(self) -> None:
+    def test_regression_detection_scales_linearly_with_metric_count(self, record_bm) -> None:
         """check_regression with 1 000 metrics must run in < 10 ms.
 
         The watchdog runs on every eval cycle. If it is O(N²) in the number of
@@ -262,6 +266,9 @@ class TestRegressionDetection:
         elapsed = time.perf_counter() - start
 
         assert len(regressions) == n
+        record_bm(
+            "Regression detection across 1k metrics", elapsed, limit_s=0.01, n=n, unit="metric"
+        )
         assert elapsed < 0.01, (
             f"check_regression for {n} metrics took {elapsed * 1000:.2f}ms; must be < 10ms"
         )

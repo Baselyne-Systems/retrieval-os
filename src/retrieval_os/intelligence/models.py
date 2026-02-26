@@ -9,7 +9,6 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import DateTime, Float, Integer, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from retrieval_os.core.database import Base
@@ -27,9 +26,7 @@ class ModelPricing(Base):
     __tablename__ = "model_pricing"
     __table_args__ = (UniqueConstraint("provider", "model", "valid_from", name="uq_model_pricing"),)
 
-    id: Mapped[str] = mapped_column(
-        PG_UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid7())
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid7()))
     provider: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     model: Mapped[str] = mapped_column(String(255), nullable=False)
     cost_per_1k_tokens: Mapped[float] = mapped_column(Float, nullable=False)
@@ -60,9 +57,7 @@ class CostEntry(Base):
         ),
     )
 
-    id: Mapped[str] = mapped_column(
-        PG_UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid7())
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid7()))
     project_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     index_config_version: Mapped[int] = mapped_column(Integer, nullable=False)
     # UTC hour boundary, e.g. 2026-02-25 14:00:00+00

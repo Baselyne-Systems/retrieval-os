@@ -15,7 +15,6 @@ from enum import StrEnum
 
 from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from retrieval_os.core.database import Base
@@ -45,9 +44,7 @@ class LineageArtifact(Base):
 
     __tablename__ = "lineage_artifacts"
 
-    id: Mapped[str] = mapped_column(
-        PG_UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid7())
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid7()))
     artifact_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     version: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -93,17 +90,15 @@ class LineageEdge(Base):
         ),
     )
 
-    id: Mapped[str] = mapped_column(
-        PG_UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid7())
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid7()))
     parent_artifact_id: Mapped[str] = mapped_column(
-        PG_UUID(as_uuid=False),
+        String(36),
         ForeignKey("lineage_artifacts.id"),
         nullable=False,
         index=True,
     )
     child_artifact_id: Mapped[str] = mapped_column(
-        PG_UUID(as_uuid=False),
+        String(36),
         ForeignKey("lineage_artifacts.id"),
         nullable=False,
         index=True,

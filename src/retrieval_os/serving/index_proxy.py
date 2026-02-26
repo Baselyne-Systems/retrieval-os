@@ -27,10 +27,9 @@ def _get_qdrant() -> Any:
             from qdrant_client import AsyncQdrantClient  # type: ignore[import]
 
             _qdrant_client = AsyncQdrantClient(
-                host=settings.qdrant_host,
-                grpc_port=settings.qdrant_grpc_port,
-                prefer_grpc=True,
+                url=f"http://{settings.qdrant_host}:{settings.qdrant_http_port}",
                 api_key=settings.qdrant_api_key or None,
+                check_compatibility=False,
             )
         except ImportError:
             raise IndexBackendError(
@@ -221,19 +220,23 @@ async def _qdrant_search(
     metadata_filters: dict | None,
     score_threshold: float | None,
 ) -> list[IndexHit]:
-    from qdrant_client.http.models import Filter  # type: ignore[import]
+    from qdrant_client.http.models import Filter, SearchRequest  # type: ignore[import]
 
     client = _get_qdrant()
     start = time.perf_counter()
     try:
-        results = await client.search(
+        query_filter = Filter(**metadata_filters) if metadata_filters else None
+        response = await client.http.search_api.search_points(
             collection_name=collection,
-            query_vector=vector,
-            limit=top_k,
-            query_filter=Filter(**metadata_filters) if metadata_filters else None,
-            score_threshold=score_threshold,
-            with_payload=True,
+            search_request=SearchRequest(
+                vector=vector,
+                filter=query_filter,
+                score_threshold=score_threshold,
+                limit=top_k,
+                with_payload=True,
+            ),
         )
+        results = response.result
     except Exception as exc:
         metrics.index_errors_total.labels(backend="qdrant").inc()
         raise IndexBackendError(

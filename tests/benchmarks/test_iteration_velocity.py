@@ -72,7 +72,7 @@ def _config_with_search_fields(**search_overrides: object) -> dict:
 
 
 class TestConfigHashThroughput:
-    def test_10k_hashes_under_2s(self) -> None:
+    def test_10k_hashes_under_2s(self, record_bm) -> None:
         """10 000 config hash computations must complete in under 2 seconds.
 
         At this rate a CI pipeline can evaluate hundreds of config candidates
@@ -92,6 +92,7 @@ class TestConfigHashThroughput:
             compute_config_hash(cfg)
         elapsed = time.perf_counter() - start
 
+        record_bm("10k config hashes", elapsed, limit_s=2.0, n=10_000, unit="hash")
         assert elapsed < 2.0, (
             f"10 000 config hashes took {elapsed:.3f}s; must be < 2s "
             f"({elapsed / 10_000 * 1000:.3f} ms/hash)"
@@ -102,7 +103,7 @@ class TestConfigHashThroughput:
 
 
 class TestConfigValidationThroughput:
-    def test_1k_validations_under_1s(self) -> None:
+    def test_1k_validations_under_1s(self, record_bm) -> None:
         """1 000 config validations must complete in under 1 second.
 
         Config validation is the first gate before any embedding work starts.
@@ -122,6 +123,7 @@ class TestConfigValidationThroughput:
             validate_index_config(cfg)
         elapsed = time.perf_counter() - start
 
+        record_bm("1k config validations", elapsed, limit_s=1.0, n=1_000, unit="validation")
         assert elapsed < 1.0, (
             f"1 000 config validations took {elapsed:.3f}s; must be < 1s "
             f"({elapsed / 1_000 * 1000:.3f} ms/validation)"

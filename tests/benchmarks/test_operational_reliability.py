@@ -122,7 +122,7 @@ class TestRolloutStepMath:
 
 
 class TestThresholdScanThroughput:
-    def test_1k_threshold_evaluations_under_5ms(self) -> None:
+    def test_1k_threshold_evaluations_under_5ms(self, record_bm) -> None:
         """Evaluating 1 000 (recall_value, threshold) pairs must take < 5 ms.
 
         The watchdog runs this check for every live deployment on every cycle.
@@ -137,6 +137,7 @@ class TestThresholdScanThroughput:
         rollback_count = sum(1 for val, threshold in evaluations if val < threshold)
         elapsed = time.perf_counter() - start
 
+        record_bm("1k watchdog threshold scans", elapsed, limit_s=0.005, n=1_000, unit="deployment")
         assert elapsed < 0.005, (
             f"1 000 threshold evaluations took {elapsed * 1000:.3f}ms; must be < 5ms"
         )

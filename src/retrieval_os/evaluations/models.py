@@ -12,7 +12,6 @@ from enum import StrEnum
 
 from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from retrieval_os.core.database import Base
@@ -40,9 +39,7 @@ class EvalJob(Base):
 
     __tablename__ = "eval_jobs"
 
-    id: Mapped[str] = mapped_column(
-        PG_UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid7())
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid7()))
     project_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     index_config_version: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(

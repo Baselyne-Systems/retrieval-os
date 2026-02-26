@@ -36,9 +36,7 @@ class Deployment(Base):
 
     __tablename__ = "deployments"
 
-    id: Mapped[str] = mapped_column(
-        PG_UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid7())
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid7()))
     project_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     project_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False, index=True
