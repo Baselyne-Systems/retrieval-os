@@ -1,34 +1,53 @@
 # Retrieval-OS
 
-A production-grade serving layer for multimodal retrieval-augmented systems. Sits above vector databases and embedding model APIs to make retrieval coherent, observable, safe to change, and measurable.
+**Production control plane for RAG and semantic search systems.**
 
-Think: **CI/CD for retrieval**. Deployment control for embedding and index changes. Continuous quality measurement via Recall@k, MRR, NDCG. Runtime cost and latency intelligence.
+Most teams build retrieval into their AI applications and then can't safely change it. A different embedding model, tighter chunking, a new index — these changes go straight to production as a single undifferentiated release. There is no canary. No quality check. No rollback. If something degrades, you find out from users, not from your infrastructure.
 
----
-
-## What It Solves
-
-Retrieval-augmented systems fail silently. You swap an embedding model, rebuild your index with slightly different settings, or adjust top-k — and recall drops two weeks later with no attribution. There is no equivalent of a diff for retrieval config. No controlled rollout. No automatic regression detection.
-
-Retrieval-OS provides:
-
-- **Immutable versioned configs** (Plans) — every change is tracked, every version is reachable
-- **Controlled deployments** — gradual rollouts with traffic weights, automatic rollback on threshold breach
-- **Continuous evaluation** — Recall@k, MRR, NDCG measured against ground truth on every deploy
-- **Full lineage** — from training dataset to deployed index, queryable in one API call
-- **Cost intelligence** — per-plan cost aggregation, cache efficiency, actionable optimization recommendations
+Retrieval-OS is the layer that closes that gap. It sits between your application and your vector database, and gives you the same operational controls you have for your application code: versioned configs, staged rollouts, automated quality measurements, and automatic rollback when quality drops.
 
 ---
 
-## Stack
+## The Workflow
 
-```
-PostgreSQL 16   Redis 7.2   Qdrant   MinIO/S3
-Prometheus      Grafana     Jaeger   OpenTelemetry
-Python 3.12 + FastAPI + asyncio   (no Kafka, no Celery)
-```
+**1. Define your retrieval pipeline as a Plan.**
 
-No message broker. No separate worker process. All background work runs as asyncio tasks in the FastAPI lifespan.
+A Plan captures everything that determines how your retrieval works: embedding model, chunking settings, index collection, distance metric, top-k, reranking. It is versioned — every change creates a new version, and old versions remain queryable and reproducible.
+
+**2. Ingest your documents.**
+
+Push documents via API. The system chunks them using the Plan's settings, embeds them with the Plan's embedding model, and upserts the vectors into the Plan's index collection. The exact config used is recorded alongside the vectors.
+
+**3. Deploy a version.**
+
+When a new version is ready, deploy it. You choose the mode:
+- **Instant** — full traffic switches immediately.
+- **Gradual** — start at 10%, increment automatically every N minutes, promote to full traffic when stable.
+
+**4. Measure quality automatically.**
+
+Run evaluation jobs against your labelled queries. The system computes Recall@k, MRR, and NDCG and compares them to the previous deployment. A regression fires a webhook and marks the deployment for review.
+
+**5. Set guard-rails.**
+
+Attach thresholds to a deployment: minimum Recall@5, maximum error rate. The watchdog checks these on every eval cycle. If a threshold is breached, the deployment is rolled back automatically — no pager, no manual intervention.
+
+---
+
+## What You Get
+
+| | |
+|---|---|
+| **Versioned retrieval configs** | Every change to model, chunking, index, or reranking is a numbered version. Reproduce any historical config exactly. Compare versions. Revert in one API call. |
+| **Gradual rollouts** | Traffic-weighted canary deployments that advance automatically. Roll back instantly if something goes wrong. |
+| **Automatic quality guard-rails** | Set Recall@5 or error-rate thresholds. Rollback happens automatically when they breach — the eval loop runs continuously without human involvement. |
+| **Document ingestion** | REST API for pushing documents. Chunks, embeds, and upserts using the active plan version's exact settings. Lineage is recorded automatically. |
+| **Full artifact lineage** | Every document chunk traces back to its source dataset, embedding run, and plan version. Answer "what was in the index when that query was served?" |
+| **Retrieval quality metrics** | Recall@k, MRR, NDCG tracked per deployment. Regression detection against the previous baseline. |
+| **Cost intelligence** | Per-plan embed token spend, cache hit ratio, and actionable optimisation recommendations. |
+| **Multi-tenancy** | API key auth, per-tenant rate limiting, tenant-scoped index isolation. |
+| **Observability** | Full OpenTelemetry traces per query, Prometheus metrics, structured JSON logs. |
+| **Webhooks** | Signed HMAC-SHA256 event delivery for deployments, rollbacks, eval regressions, and ingestion completions. |
 
 ---
 
@@ -38,12 +57,11 @@ No message broker. No separate worker process. All background work runs as async
 # Prerequisites: Python 3.12+, uv, Docker
 git clone https://github.com/your-org/retrieval-os.git
 cd retrieval-os
-
 uv sync --all-extras
 cp .env.example .env
 make infra        # starts Postgres, Redis, Qdrant, MinIO, Prometheus, Grafana, Jaeger
-make migrate      # runs Alembic migrations
-make dev          # starts the API on :8000 with hot reload
+make migrate
+make dev          # API on :8000 with hot reload
 ```
 
 ```bash
@@ -52,10 +70,10 @@ curl http://localhost:8000/ready
 # {"status":"ok","checks":{"postgres":"ok","redis":"ok"}}
 ```
 
-Create a plan, deploy it, and query it:
+### Create a plan and run a query
 
 ```bash
-# Create a plan
+# 1. Define your retrieval pipeline
 curl -X POST http://localhost:8000/v1/plans \
   -H 'Content-Type: application/json' \
   -d '{
@@ -73,12 +91,24 @@ curl -X POST http://localhost:8000/v1/plans \
     }
   }'
 
-# Deploy it
+# 2. Ingest documents
+curl -X POST http://localhost:8000/v1/plans/docs/ingest \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "created_by": "eng",
+    "chunk_size": 512,
+    "overlap": 64,
+    "documents": [
+      {"id": "doc-1", "content": "Your document text here.", "metadata": {"source": "wiki"}}
+    ]
+  }'
+
+# 3. Deploy version 1
 curl -X POST http://localhost:8000/v1/plans/docs/deployments \
   -H 'Content-Type: application/json' \
   -d '{"plan_version": 1, "created_by": "eng"}'
 
-# Query it
+# 4. Query
 curl -X POST http://localhost:8000/v1/query/docs \
   -H 'Content-Type: application/json' \
   -d '{"query": "how does RAG work?"}'
@@ -90,103 +120,75 @@ curl -X POST http://localhost:8000/v1/query/docs \
 
 | Doc | What it covers |
 |---|---|
-| [Architecture](docs/architecture.md) | System design, serving path invariants, Redis layout, deployment state machine, config hash, error hierarchy |
+| [Architecture](docs/architecture.md) | Concepts and mental model, system design, serving path, deployment state machine, background tasks |
 | [API Reference](docs/api-reference.md) | All endpoints with request/response schemas, error codes, and curl examples |
 | [Data Models](docs/data-models.md) | Schema-level reference for every table, column types, constraints, indexes |
 | [Configuration](docs/configuration.md) | All environment variables with defaults, constraints, and per-environment examples |
-| [Observability](docs/observability.md) | Complete Prometheus metric catalogue, trace structure, alert rules, Grafana dashboards |
+| [Observability](docs/observability.md) | Prometheus metric catalogue, trace structure, alert rules, Grafana dashboards |
 | [Developer Guide](docs/developer-guide.md) | Setup, Make targets, project layout, test patterns, migration workflow |
 
 ---
 
-## API Surface (implemented)
+## Stack
 
 ```
-# Serving (hot path — P99 target < 200ms)
-POST  /v1/query/{plan_name}
+PostgreSQL 16   Redis 7.2   Qdrant   MinIO/S3
+Prometheus      Grafana     Jaeger   OpenTelemetry
+Python 3.12 + FastAPI + asyncio   (no Kafka, no Celery)
+```
 
-# Plans (immutable versioned configs)
-POST   /v1/plans
-GET    /v1/plans                        cursor-paginated
-GET    /v1/plans/{name}
-POST   /v1/plans/{name}/versions
-GET    /v1/plans/{name}/versions
-GET    /v1/plans/{name}/versions/{num}
-POST   /v1/plans/{name}/clone
-DELETE /v1/plans/{name}                 soft-archive
+No message broker. No separate worker process. All background work runs as asyncio tasks in the FastAPI lifespan.
 
-# Deployments (traffic control)
-POST   /v1/plans/{name}/deployments
-GET    /v1/plans/{name}/deployments
-GET    /v1/plans/{name}/deployments/{id}
-POST   /v1/plans/{name}/deployments/{id}/rollback
+---
 
-# Infrastructure
+## API Surface
+
+```
+POST  /v1/query/{plan_name}                            Serve a retrieval query
+
+POST   /v1/plans/{name}/ingest                         Ingest documents
+GET    /v1/plans/{name}/ingest/{job_id}                Check ingestion job status
+
+POST   /v1/plans                                       Create a plan
+GET    /v1/plans                                       List plans (cursor-paginated)
+GET    /v1/plans/{name}                                Get a plan
+DELETE /v1/plans/{name}                                Archive a plan
+
+POST   /v1/plans/{name}/versions                       Create a new version
+GET    /v1/plans/{name}/versions                       List all versions
+GET    /v1/plans/{name}/versions/{num}                 Get a specific version
+
+POST   /v1/plans/{name}/deployments                    Deploy a version
+GET    /v1/plans/{name}/deployments                    List deployments
+GET    /v1/plans/{name}/deployments/{id}               Get deployment status
+POST   /v1/plans/{name}/deployments/{id}/rollback      Roll back a deployment
+
+POST   /v1/webhooks                                    Register a webhook
+GET    /v1/webhooks                                    List webhooks
+DELETE /v1/webhooks/{id}                               Remove a webhook
+
 GET    /health
 GET    /ready
-GET    /metrics                         Prometheus text format
-GET    /v1/info
+GET    /metrics                                        Prometheus text format
 ```
 
 ---
 
-## Build Progress
+## Build Status
 
 | Phase | Status | What it adds |
 |---|---|---|
-| **1 — Foundation** | Done | FastAPI app, infra stack, OTel, Prometheus, structured logs, /health /ready /metrics |
-| **2 — Plans** | Done | Immutable versioned plan configs, validation, config hash deduplication |
-| **3 — Serving Path** | Done | Redis cache → embed → Qdrant ANN → response; usage record fire-and-forget |
-| **4 — Deployments** | Done | Deployment state machine, gradual rollouts, rollback watchdog + stepper activated |
-| **5 — Lineage** | Next | Artifact DAG, recursive CTE traversal, orphan detection |
-| **6 — Evaluation** | Planned | Recall@k, MRR, NDCG, eval job runner, regression alerts |
-| **7 — Cost Intelligence** | Planned | Usage aggregation, cost per plan, optimization recommendations |
-| **8 — Production Hardening** | Planned | K8s, circuit breakers, cross-modal RRF, load tests |
+| Foundation | Done | FastAPI app, infra stack, OTel, Prometheus, structured logs |
+| Plans | Done | Versioned pipeline configs, validation, config hash deduplication |
+| Serving | Done | Redis cache → embed → Qdrant ANN → response |
+| Deployments | Done | State machine, gradual rollouts, rollback watchdog |
+| Lineage | Done | Artifact DAG, dataset → embedding → index traceability |
+| Evaluation | Done | Recall@k, MRR, NDCG, eval job runner, regression detection |
+| Cost Intelligence | Done | Usage aggregation, cost per plan, optimisation recommendations |
+| Production Hardening | Done | Circuit breakers, cross-modal RRF, K8s manifests, load tests |
+| Multimodal | Done | CLIP image embed, Whisper audio→text, sparse BM25 |
+| Multi-tenancy | Done | API key auth, rate limiting, tenant isolation |
+| Webhooks | Done | HMAC-SHA256 signed event delivery with retry |
+| Ingestion | Done | Word-boundary chunker, embed→upsert pipeline, lineage auto-registration |
 
-**87 unit tests, all passing. Linter clean (ruff).**
-
----
-
-## Key Design Decisions
-
-**Serving path never reads Postgres.**
-Plan config lives in Redis (`ros:plan:{name}:current`, 30s TTL). A Postgres failure cannot cause query failures. On Redis miss, one Postgres read warms the cache.
-
-**Plan validation at write time.**
-Every `PlanVersion` in the database is contractually valid. The serving path performs zero defensive checks. Validation errors surface at plan creation with all field failures in one response.
-
-**Config hash for deduplication.**
-`compute_config_hash()` produces a SHA-256 of the fields that define retrieval behaviour (excluding cost/cache/governance fields). Creating a version with identical behaviour to an existing one returns HTTP 409 — no wasted DB row, no ambiguous dual versions.
-
-**SELECT FOR UPDATE for monotonic version numbers.**
-Concurrent version creates lock the parent `RetrievalPlan` row. This serialises the `MAX(version) + 1` computation and guarantees gapless monotonic integers across racing requests.
-
-**UUIDv7 PKs everywhere.**
-Time-ordered, globally unique, embed creation timestamp, no enumeration attack surface.
-
-**Asyncio for all background work.**
-Four loops in the FastAPI lifespan: rollback watchdog, rollout stepper, eval job runner, cost aggregator. Each loop commits its own session. Exceptions are logged and swallowed — a transient DB error never crashes the API.
-
----
-
-## Metrics Available Now
-
-```
-retrieval_os_retrieval_requests_total{plan_name}
-retrieval_os_retrieval_latency_seconds{plan_name}        P50/P95/P99 SLO
-retrieval_os_cache_hits_total{plan_name}
-retrieval_os_cache_misses_total{plan_name}
-retrieval_os_embed_requests_total{provider}
-retrieval_os_embed_latency_seconds{provider}
-retrieval_os_embed_errors_total{provider}
-retrieval_os_index_latency_seconds{backend}
-retrieval_os_index_errors_total{backend}
-retrieval_os_plans_total
-retrieval_os_plan_versions_total{plan_name}
-retrieval_os_deployment_status{deployment_id, plan_name, environment, status}
-retrieval_os_deployment_traffic_weight{deployment_id, plan_name, environment}
-retrieval_os_rollback_events_total{deployment_id, plan_name, triggered_by}
-retrieval_os_rollout_duration_seconds{plan_name}
-```
-
-Full trace per query in Jaeger. Structured JSON logs to stdout.
+**438 tests (387 unit + 51 integration), all passing. Linter clean (ruff).**

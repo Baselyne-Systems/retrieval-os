@@ -1,6 +1,40 @@
 # Architecture
 
-Retrieval-OS is a serving layer that sits between your application and the underlying vector databases and embedding model APIs. It makes retrieval systems coherent, observable, upgradeable, and safe to change in production.
+Retrieval-OS is a production control plane for RAG and semantic search systems. It sits between your application and your vector database, and provides versioning, deployment control, quality measurement, and automatic rollback for retrieval pipelines — the operational controls that vector databases and embedding APIs do not provide on their own.
+
+---
+
+## Core Concepts
+
+Before reading the technical design, it helps to understand what each concept maps to from a user's perspective.
+
+### Plan
+
+A **Plan** is the complete specification for a retrieval pipeline: which embedding model encodes queries and documents, how documents are chunked before indexing, which vector collection they go into, how many results to retrieve, whether to rerank, and cache settings.
+
+When you want to change any of these — swap the model, tighten chunking, add a reranker — you create a new **version** of the Plan. The previous version is preserved and still queryable. Versions are numbered sequentially and are immutable once created. Think of them as commits to your retrieval configuration.
+
+### Deployment
+
+A **Deployment** activates a plan version for live traffic. You can deploy instantly (100% traffic switch) or gradually (start at a low traffic weight, advance automatically on a schedule, promote to full traffic when stable). At most one deployment is live per plan at any time.
+
+Deployments are the gate between "a config I wrote" and "a config serving real queries". The deployment record captures when a version went live, what traffic share it held, and — if it was rolled back — why.
+
+### Ingestion Job
+
+An **Ingestion Job** loads documents into the vector index using a specific plan version's settings. You push documents via API; the system chunks them, embeds them, and upserts the vectors into the correct collection. The ingestion job records which plan version processed each document, so the index always has a clear provenance chain.
+
+### Evaluation Job
+
+An **Evaluation Job** measures retrieval quality for a deployed plan version. You provide labelled query–document pairs (ground truth); the system runs each query through the live retrieval pipeline and computes Recall@k, MRR, and NDCG. Results are compared to the previous deployment's baseline. A drop beyond a configurable threshold fires a regression alert.
+
+### Deployment Guard-Rails
+
+When creating a deployment, you can attach quality thresholds: a minimum Recall@5, a maximum error rate, or both. The rollback watchdog checks active deployments against the latest completed evaluation. If a threshold is breached, the deployment is rolled back automatically — no human required.
+
+### Lineage
+
+Every artifact produced by the system — a chunked dataset, an embedding run, an index snapshot — is recorded as a node in a lineage graph, with directed edges linking parents to children. You can trace any document chunk in the index back to its source file, the embedding model that encoded it, and the plan version that owns it.
 
 ---
 
